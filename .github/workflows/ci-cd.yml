@@ -1,0 +1,34 @@
+name: CI/CD Pipeline - Automated Build & Test
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: Build, Lint & Validate Schema
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Validate Prisma Database Schema
+        run: npx prisma validate --schema=packages/database/prisma/schema.prisma
+
+      - name: Generate Prisma Client
+        run: npm run db:generate
+
+      - name: Run Build & Type Check
+        run: npm run build

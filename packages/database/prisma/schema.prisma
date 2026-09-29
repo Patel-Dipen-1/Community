@@ -1,0 +1,624 @@
+// Prisma Schema for B2B Business Platform
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  MANUFACTURER
+  DISTRIBUTOR
+  WHOLESALER
+  TRADER
+  RETAILER
+  SUPER_ADMIN
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  APPROVED
+  REJECTED
+  BLOCKED
+  BLACK
+}
+
+enum InquiryStatus {
+  PENDING
+  QUOTED
+  NEGOTIATING
+  ACCEPTED
+  REJECTED
+  CLOSED
+}
+
+enum SessionStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+model User {
+  id                  String             @id @default(uuid())
+  fullName            String
+  mobileNumber        String             @unique
+  email               String             @unique
+  passwordHash        String?
+  avatar              String?
+  googleId            String?            @unique
+  isVerified          Boolean            @default(false)
+  status              VerificationStatus @default(UNVERIFIED)
+  isDeletionRequested Boolean            @default(false)
+  deletionReason      String?
+  
+  business            Business?
+  sessions            Session[]
+  sentMessages        Message[]          @relation("SentMessages")
+  conversationsAsUser1 Conversation[]    @relation("User1Conversations")
+  conversationsAsUser2 Conversation[]    @relation("User2Conversations")
+  
+  createdGroups       Group[]            @relation("CreatedGroups")
+  groupMemberships    GroupMember[]      @relation("GroupMemberships")
+  sentGroupMessages   GroupMessage[]     @relation("SentGroupMessages")
+  statuses            Status[]
+  statusViews         StatusView[]
+  comments            Comment[]
+  likes               Like[]
+  subscription        UserSubscription?
+  paymentTransactions PaymentTransaction[]
+  categoryAttributeRequests CategoryAttributeRequest[]
+
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([isDeletionRequested])
+  @@index([fullName])
+  @@index([status, createdAt])
+}
+
+enum GroupRole {
+  ADMIN
+  MEMBER
+}
+
+model Business {
+  id                  String             @id @default(uuid())
+  userId              String             @unique
+  shopName            String
+  gstNumber           String?
+  streetAddress       String
+  city                String
+  state               String
+  pincode             String
+  verificationTag     Boolean            @default(false)
+  assignedRole        Role?
+  allowedCommunities  String[]           // Array of community slugs user is granted access to (e.g. ["clothing", "electronics"])
+  
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media               VerificationMedia[]
+  communityMemberships CommunityMember[]
+  products            Product[]
+  sentInquiries       Inquiry[]          @relation("SentInquiries")
+  receivedRfqs        Inquiry[]          @relation("ReceivedInquiries")
+  capturedLeads       LeadCapture[]
+  statuses            Status[]
+  store               Store?
+  
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([shopName])
+  @@index([assignedRole])
+  @@index([createdAt])
+  @@index([assignedRole, createdAt])
+}
+
+model Store {
+  id          String    @id @default(uuid())
+  businessId  String    @unique
+  name        String
+  slug        String    @unique
+  bio         String?
+  logoUrl     String?
+  bannerUrl   String?
+  isActive    Boolean   @default(true)
+  
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+model VerificationMedia {
+  id         String   @id @default(uuid())
+  businessId String
+  url        String
+  mediaType  String   // IMAGE or VIDEO
+  
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+}
+
+model Session {
+  id         String        @id @default(uuid())
+  userId     String
+  token      String        @unique
+  deviceId   String?
+  platform   String?       // WEB, IOS, ANDROID
+  ipAddress  String?
+  status     SessionStatus @default(ACTIVE)
+  lastActive DateTime      @default(now())
+  
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+
+  @@index([status])
+  @@index([lastActive])
+  @@index([status, lastActive])
+}
+
+model Community {
+  id          String            @id @default(uuid())
+  slug        String            @unique // "clothing", "jewellery", "electronics"
+  name        String            // "Clothing Community", "Jewellery Community", "Electronics"
+  description String?
+  isActive    Boolean           @default(true)
+  
+  categories  Category[]
+  members     CommunityMember[]
+  products    Product[]
+  
+  createdAt   DateTime          @default(now())
+}
+
+model CommunityMember {
+  id          String    @id @default(uuid())
+  businessId  String
+  communityId String
+  role        Role
+  
+  business    Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime  @default(now())
+
+  @@unique([businessId, communityId])
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  communityId String
+  slug        String    @unique
+  name        String
+  specFields  Json
+  
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  products    Product[]
+  
+  createdAt   DateTime  @default(now())
+}
+
+model Product {
+  id           String     @id @default(uuid())
+  code         String     @unique
+  businessId   String
+  communityId  String
+  categoryId   String
+  title        String
+  description  String
+  moq          Int        @default(1)
+  priceTiers   Json
+  images       String[]
+  videoUrl     String?
+  specs        Json
+  isHotSelling Boolean    @default(false)
+  isActive     Boolean    @default(true)
+  
+  business     Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  community    Community  @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  category     Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  inquiries    Inquiry[]
+  comments     Comment[]
+  likes        Like[]
+  
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([businessId])
+  @@index([code])
+  @@index([isActive])
+}
+
+model LeadCapture {
+  id              String   @id @default(uuid())
+  businessId      String
+  creatorUserId   String?
+  visitorName     String
+  mobileNumber    String
+  productCode     String?
+  targetCategory  String   @default("clothing")
+  message         String?
+  quantity        Int?     @default(1)
+  status          String   @default("ACTIVE")
+  
+  batchSize       Int      @default(10)
+  currentBatch    Int      @default(1)
+  assignedUserIds String[]
+  clickedUserIds  String[]
+  totalClicks     Int      @default(0)
+  
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+
+  @@index([businessId])
+  @@index([targetCategory])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Inquiry {
+  id           String        @id @default(uuid())
+  senderId     String
+  receiverId   String
+  productId    String?
+  quantity     Int
+  targetPrice  Float?
+  message      String
+  status       InquiryStatus @default(PENDING)
+  
+  sender       Business      @relation("SentInquiries", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver     Business      @relation("ReceivedInquiries", fields: [receiverId], references: [id], onDelete: Cascade)
+  product      Product?      @relation(fields: [productId], references: [id])
+  
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Conversation {
+  id        String    @id @default(uuid())
+  user1Id   String
+  user2Id   String
+  user1     User      @relation("User1Conversations", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2     User      @relation("User2Conversations", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+}
+
+model Message {
+  id              String       @id @default(uuid())
+  conversationId  String
+  senderId        String
+  clientMessageId String?
+  replyToId       String?
+  text            String?
+  productCode     String?
+  mediaUrl        String?
+  isForwarded     Boolean      @default(false)
+  isEdited        Boolean      @default(false)
+  isDeleted       Boolean      @default(false)
+  status          String       @default("SENT") // SENT, DELIVERED, READ
+  reactions       Json?        // Array of { userId: string, emoji: string }
+  
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User         @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  replyToMessage  Message?     @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies         Message[]    @relation("MessageReplies")
+  
+  createdAt       DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([conversationId, createdAt])
+  @@index([conversationId, createdAt, id])
+  @@index([senderId])
+  @@unique([senderId, clientMessageId])
+}
+
+model Group {
+  id                      String         @id @default(uuid())
+  title                   String
+  description             String?
+  type                    String         @default("GROUP")
+  communitySlug           String         @default("clothing")
+  createdById             String
+  maxCapacity             Int            @default(40)
+  onlyAdminCanPost        Boolean        @default(false)
+  hideMemberIdentity      Boolean        @default(true)
+  membersCanSeeMemberList Boolean        @default(false)
+  isDeleted               Boolean        @default(false)
+  
+  createdBy               User           @relation("CreatedGroups", fields: [createdById], references: [id], onDelete: Cascade)
+  members                 GroupMember[]
+  messages                GroupMessage[]
+  
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  @@index([createdById])
+  @@index([communitySlug])
+  @@index([isDeleted])
+  @@index([createdAt])
+}
+
+model GroupMember {
+  id          String    @id @default(uuid())
+  groupId     String
+  userId      String
+  roleInGroup GroupRole @default(MEMBER)
+  joinedAt    DateTime  @default(now())
+
+  group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user        User      @relation("GroupMemberships", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@index([groupId, roleInGroup])
+}
+
+model GroupMessage {
+  id              String        @id @default(uuid())
+  groupId         String
+  senderId        String
+  clientMessageId String?
+  replyToId       String?
+  text            String?
+  productCode     String?
+  mediaUrl        String?
+  isForwarded     Boolean       @default(false)
+  isEdited        Boolean       @default(false)
+  isDeleted       Boolean       @default(false)
+  status          String        @default("SENT")
+  reactions       Json?         // Array of { userId: string, emoji: string }
+  createdAt       DateTime      @default(now())
+
+  group           Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender          User          @relation("SentGroupMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  replyToMessage  GroupMessage? @relation("GroupMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies         GroupMessage[] @relation("GroupMessageReplies")
+
+  @@index([groupId])
+  @@index([groupId, createdAt])
+  @@index([groupId, createdAt, id])
+  @@index([senderId])
+  @@unique([senderId, clientMessageId])
+}
+
+model UserBlock {
+  id            String   @id @default(uuid())
+  blockerId     String
+  blockedUserId String
+  createdAt     DateTime @default(now())
+
+  @@unique([blockerId, blockedUserId])
+  @@index([blockerId])
+  @@index([blockedUserId])
+}
+
+model ConversationSetting {
+  id             String   @id @default(uuid())
+  userId         String
+  conversationId String
+  isPinned       Boolean  @default(false)
+  isArchived     Boolean  @default(false)
+  isMuted        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, conversationId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model Status {
+  id           String       @id @default(uuid())
+  userId       String
+  businessId   String
+  caption      String?
+  mediaUrl     String?
+  mediaType    String       @default("IMAGE") // IMAGE, VIDEO, TEXT
+  bgColor      String?
+  categories   String[]     // Array of target categories (e.g. ["clothing", "hardware"])
+  
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  views        StatusView[]
+  comments     Comment[]
+  likes        Like[]
+  
+  createdAt    DateTime     @default(now())
+  expiresAt    DateTime?
+
+  @@index([userId])
+  @@index([businessId])
+  @@index([createdAt])
+}
+
+model StatusView {
+  id        String   @id @default(uuid())
+  statusId  String
+  viewerId  String
+  viewedAt  DateTime @default(now())
+
+  status    Status   @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  viewer    User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+
+  @@unique([statusId, viewerId])
+  @@index([statusId])
+  @@index([viewerId])
+}
+
+model SystemSetting {
+  id                                 String   @id @default("default")
+  subscriptionSystemEnabled          Boolean  @default(false)
+  freeTrialEnabled                   Boolean  @default(true)
+  trialExpiryWarningEnabled          Boolean  @default(true)
+  paymentEnabled                     Boolean  @default(true)
+  renewalEnabled                     Boolean  @default(true)
+  subscriptionNotificationsEnabled   Boolean  @default(true)
+  subscriptionPopupEnabled          Boolean  @default(true)
+  
+  // Payment Gateway Controls
+  razorpayEnabled                    Boolean  @default(true)
+  stripeEnabled                      Boolean  @default(true)
+  manualPaymentEnabled               Boolean  @default(true)
+  manualPaymentWhatsapp              String   @default("+919999999999")
+  
+  updatedAt                          DateTime @updatedAt
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+model UserSubscription {
+  id               String             @id @default(uuid())
+  userId           String             @unique
+  planName         String             @default("ENTERPRISE_PRO")
+  status           SubscriptionStatus @default(TRIAL)
+  trialEndsAt      DateTime?
+  currentPeriodEnd DateTime?
+  
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum PaymentStatus {
+  COMPLETED
+  PENDING_VERIFICATION
+  DUE
+  REJECTED
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  STRIPE
+  MANUAL
+}
+
+model PaymentCycle {
+  id              String               @id @default(uuid())
+  name            String
+  durationMonths  Int                  @default(1)
+  amount          Float                @default(4999)
+  currency        String               @default("INR")
+  description     String?
+  isActive        Boolean              @default(true)
+  
+  transactions    PaymentTransaction[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([isActive])
+}
+
+model PaymentTransaction {
+  id              String        @id @default(uuid())
+  userId          String
+  invoiceNumber   String        @unique
+  cycleId         String?
+  planName        String        @default("ENTERPRISE_PRO")
+  cycleName       String        @default("1st Month Payment")
+  amount          Float         @default(4999)
+  currency        String        @default("INR")
+  paymentMethod   PaymentMethod @default(MANUAL)
+  status          PaymentStatus @default(PENDING_VERIFICATION)
+  screenshotUrl   String?
+  transactionRef  String?
+  rejectionReason String?
+  paymentDate     DateTime?
+  nextDueDate     DateTime?
+  
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycle           PaymentCycle? @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([paymentMethod])
+  @@index([createdAt])
+}
+
+model CategoryAttributeRequest {
+  id              String   @id @default(uuid())
+  userId          String
+  type            String   // CATEGORY, FABRIC, GENDER, FIT, SEASON, SIZE, PATTERN
+  value           String
+  description     String?
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  rejectionReason String?
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model Comment {
+  id         String   @id @default(uuid())
+  userId     String
+  statusId   String?
+  productId  String?
+  text       String
+  
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status     Status?  @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  product    Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([statusId])
+  @@index([productId])
+  @@index([userId])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  userId    String
+  statusId  String?
+  productId String?
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    Status?  @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+
+  @@unique([userId, statusId])
+  @@unique([userId, productId])
+  @@index([statusId])
+  @@index([productId])
+  @@index([userId])
+}
+
+
+
+
+
+
+
