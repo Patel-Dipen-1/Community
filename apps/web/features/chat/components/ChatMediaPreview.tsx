@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { VoiceWaveformPlayer } from './VoiceWaveformPlayer';
 
 interface ChatMediaPreviewProps {
   mediaUrl: string;
@@ -22,8 +23,9 @@ export function ChatMediaPreview({ mediaUrl, senderName }: ChatMediaPreviewProps
     lowerUrl.includes('.wav') ||
     lowerUrl.includes('.ogg') ||
     lowerUrl.includes('.m4a') ||
-    lowerUrl.includes('voice_note') ||
-    lowerUrl.includes('/audio/');
+    lowerUrl.includes('.webm') && lowerUrl.includes('voice_note') ||
+    lowerUrl.includes('/audios/') ||
+    lowerUrl.includes('voice_note');
 
   const isVideo =
     !isAudio &&
@@ -95,19 +97,11 @@ export function ChatMediaPreview({ mediaUrl, senderName }: ChatMediaPreviewProps
       )}
 
       {/* ============================================================ */}
-      {/* 2. VOICE NOTE AUDIO PLAYER CARD                             */}
+      {/* 2. VOICE NOTE AUDIO PLAYER CARD (WhatsApp Style Waveform)   */}
       {/* ============================================================ */}
       {isAudio && (
-        <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/40 w-full max-w-[280px] sm:max-w-[320px] flex items-center gap-3 shadow-md">
-          <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center text-lg flex-shrink-0">
-            🎙️
-          </div>
-          <div className="flex-1 min-w-0">
-            <audio controls src={cleanUrl} className="w-full h-8 accent-emerald-500" preload="metadata" />
-            <p className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider mt-1">
-              Voice Note • Recorded Audio
-            </p>
-          </div>
+        <div className="my-1.5 w-full">
+          <VoiceWaveformPlayer audioUrl={cleanUrl} senderName={senderName} />
         </div>
       )}
 

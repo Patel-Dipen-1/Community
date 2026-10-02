@@ -40,6 +40,15 @@ router.put('/conversations/:id/settings', ChatController.updateSettings);
 // Fetch LiveKit Short-Lived Access Token for Audio/Video RTC Room
 router.post('/livekit-token', ChatController.getLiveKitToken);
 
+// Interactive Polls
+router.post('/polls', ChatController.createPoll);
+router.post('/polls/:id/vote', ChatController.votePoll);
+router.get('/polls/:id', ChatController.getPoll);
+
+// Star / Bookmark Messages
+router.post('/messages/:id/star', ChatController.toggleStarMessage);
+router.get('/starred-messages', ChatController.getStarredMessages);
+
 export default router;
 
 

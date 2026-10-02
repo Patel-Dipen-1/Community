@@ -56,5 +56,15 @@ router.post('/global-capacity', authenticateToken, GroupController.updateGlobalC
 // Super Admin Update Specific Group Capacity Limit
 router.put('/:id/capacity', authenticateToken, GroupController.updateCapacity);
 
+// Group Invite Links & Join via Token
+router.get('/:id/invite-link', authenticateToken, GroupController.getInviteLink);
+router.post('/join-via-token', authenticateToken, GroupController.joinViaInviteToken);
+
+// Group Join Requests Queue & Admin Approvals
+router.post('/:id/join-request', authenticateToken, GroupController.createJoinRequest);
+router.get('/:id/join-requests', authenticateToken, GroupController.getJoinRequests);
+router.post('/:id/join-requests/:requestId/approve', authenticateToken, GroupController.approveJoinRequest);
+router.post('/:id/join-requests/:requestId/reject', authenticateToken, GroupController.rejectJoinRequest);
+
 export default router;
 

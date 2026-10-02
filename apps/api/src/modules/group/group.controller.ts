@@ -263,5 +263,78 @@ export class GroupController {
       res.status(400).json({ error: error.message });
     }
   }
+
+  static async getInviteLink(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const result = await GroupService.getOrCreateInviteToken(id, userId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async joinViaInviteToken(req: Request, res: Response) {
+    try {
+      const { token } = req.body;
+      const userId = (req as any).user.userId || (req as any).user.id;
+      if (!token) return res.status(400).json({ error: 'Invite token is required' });
+      const result = await GroupService.joinViaInviteToken(userId, token);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async createJoinRequest(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const result = await GroupService.createJoinRequest(id, userId);
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`group_${id}`).emit('group:join_request', result.request);
+      }
+
+      res.status(201).json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async getJoinRequests(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const requests = await GroupService.getPendingJoinRequests(id, userId);
+      res.json({ success: true, requests });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async approveJoinRequest(req: Request, res: Response) {
+    try {
+      const { id, requestId } = req.params;
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const result = await GroupService.approveJoinRequest(id, requestId, userId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async rejectJoinRequest(req: Request, res: Response) {
+    try {
+      const { id, requestId } = req.params;
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const result = await GroupService.rejectJoinRequest(id, requestId, userId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
 }
 

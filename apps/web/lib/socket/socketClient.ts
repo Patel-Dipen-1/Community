@@ -36,3 +36,24 @@ export function joinSocketGroup(groupId: string) {
     s.emit('join_group', groupId);
   }
 }
+
+export function emitTypingStart(data: { conversationId?: string; groupId?: string; userId: string; userName?: string }) {
+  const s = getSocket();
+  if (s && data.userId) {
+    s.emit('typing_start', data);
+  }
+}
+
+export function emitTypingStop(data: { conversationId?: string; groupId?: string; userId: string }) {
+  const s = getSocket();
+  if (s && data.userId) {
+    s.emit('typing_stop', data);
+  }
+}
+
+export function requestUserPresence(targetUserId: string) {
+  const s = getSocket();
+  if (s && targetUserId) {
+    s.emit('get_user_presence', targetUserId);
+  }
+}

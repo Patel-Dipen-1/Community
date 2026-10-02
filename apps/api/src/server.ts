@@ -93,14 +93,30 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(globalRateLimiter);
 
-// Serve Static Uploaded Images & Videos from Local Disk (`apps/api/uploads/`)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Serve Static Uploaded Images, Audios & Videos from Local Disk (`apps/api/uploads/`)
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, '../uploads'), {
+    setHeaders: (res, filePath) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Accept-Ranges', 'bytes');
+      if (filePath.endsWith('.webm')) {
+        res.setHeader('Content-Type', 'audio/webm');
+      } else if (filePath.endsWith('.mp4') || filePath.endsWith('.m4a')) {
+        res.setHeader('Content-Type', 'audio/mp4');
+      } else if (filePath.endsWith('.ogg')) {
+        res.setHeader('Content-Type', 'audio/ogg');
+      }
+    },
+  })
+);
 
 // 2. Feature-Based API Module Mounts
 import statusRoutes from './modules/status/status.routes';
 import subscriptionRoutes from './modules/subscription/subscription.routes';
 import commentRoutes from './modules/comment/comment.routes';
 import likeRoutes from './modules/like/like.routes';
+import broadcastRoutes from './modules/broadcast/broadcast.routes';
 import { verifySubscriptionAccess } from './middleware/subscription.middleware';
 
 app.use('/api/v1/auth', authRateLimiter, userRoutes);
@@ -114,6 +130,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/groups', verifySubscriptionAccess, groupRoutes);
 app.use('/api/v1/upload', uploadRoutes);
 app.use('/api/v1/chat', verifySubscriptionAccess, chatRoutes);
+app.use('/api/v1/broadcast', verifySubscriptionAccess, broadcastRoutes);
 app.use('/api/v1/subscription', subscriptionRoutes);
 app.use('/api/v1/comments', verifySubscriptionAccess, commentRoutes);
 app.use('/api/v1/likes', verifySubscriptionAccess, likeRoutes);
@@ -162,8 +179,31 @@ io.on('connection', (socket) => {
       }
 
       if (isFirstSocket) {
-        io.emit('user_presence_change', { userId, status: 'ONLINE' });
+        io.emit('user_presence_change', { userId, status: 'ONLINE', lastSeen: null });
       }
+    }
+  });
+
+  // Fetch Presence & Last Seen for a target user
+  socket.on('get_user_presence', async (targetUserId: string) => {
+    if (!targetUserId) return;
+    const isOnline = (userSocketsMap.get(targetUserId)?.size || 0) > 0;
+    try {
+      const targetUser = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { updatedAt: true },
+      });
+      socket.emit('user_presence_status', {
+        userId: targetUserId,
+        status: isOnline ? 'ONLINE' : 'OFFLINE',
+        lastSeen: targetUser?.updatedAt?.toISOString() || null,
+      });
+    } catch {
+      socket.emit('user_presence_status', {
+        userId: targetUserId,
+        status: isOnline ? 'ONLINE' : 'OFFLINE',
+        lastSeen: null,
+      });
     }
   });
 
@@ -521,7 +561,44 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  // Typing Indicator Events (Direct Chat & Group Chat)
+  socket.on('typing_start', (data: { conversationId?: string; groupId?: string; userId: string; userName?: string }) => {
+    if (!data?.userId) return;
+    if (data.conversationId) {
+      socket.to(data.conversationId).emit('user_typing', {
+        conversationId: data.conversationId,
+        userId: data.userId,
+        userName: data.userName || 'Someone',
+        isTyping: true,
+      });
+    } else if (data.groupId) {
+      socket.to(`group_${data.groupId}`).emit('user_typing', {
+        groupId: data.groupId,
+        userId: data.userId,
+        userName: data.userName || 'Member',
+        isTyping: true,
+      });
+    }
+  });
+
+  socket.on('typing_stop', (data: { conversationId?: string; groupId?: string; userId: string }) => {
+    if (!data?.userId) return;
+    if (data.conversationId) {
+      socket.to(data.conversationId).emit('user_typing', {
+        conversationId: data.conversationId,
+        userId: data.userId,
+        isTyping: false,
+      });
+    } else if (data.groupId) {
+      socket.to(`group_${data.groupId}`).emit('user_typing', {
+        groupId: data.groupId,
+        userId: data.userId,
+        isTyping: false,
+      });
+    }
+  });
+
+  socket.on('disconnect', async () => {
     const userId = socket.data.userId;
     if (userId) {
       // Clean up any ongoing calls associated with this user upon socket disconnect/refresh
@@ -546,18 +623,30 @@ io.on('connection', (socket) => {
           if (redisClient) {
             redisClient.del(`presence:user:${userId}`).catch(() => {});
           }
-          io.emit('user_presence_change', { userId, status: 'OFFLINE' });
+          const lastSeenDate = new Date();
+          try {
+            await prisma.user.update({
+              where: { id: userId },
+              data: { updatedAt: lastSeenDate },
+            });
+          } catch {}
+          io.emit('user_presence_change', { userId, status: 'OFFLINE', lastSeen: lastSeenDate.toISOString() });
         }
       }
     }
   });
 });
 
-server.listen(PORT, () => {
+import { seedBroadcastDefaults } from './modules/broadcast/broadcast.seed';
+
+server.listen(PORT, async () => {
   logger.info(`=================================================`);
   logger.info(`🚀 B2B Platform API running on port ${PORT}`);
   logger.info(`📂 Local Media Uploads served at: http://localhost:${PORT}/uploads/`);
   logger.info(`=================================================`);
+
+  // Seed Broadcast default feature flags, limits & permissions
+  await seedBroadcastDefaults().catch(() => {});
 });
 
 // Phase 15: Graceful Shutdown Handler

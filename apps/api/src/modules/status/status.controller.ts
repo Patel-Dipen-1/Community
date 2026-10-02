@@ -113,4 +113,21 @@ export class StatusController {
       res.status(400).json({ success: false, error: error.message });
     }
   }
+
+  // Mute / Unmute Contact Statuses
+  static async toggleMute(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.userId || (req as any).user?.id;
+      const targetUserId = req.params.id;
+
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'UNAUTHORIZED: Sign in required' });
+      }
+
+      const result = await StatusService.toggleMuteStatus(userId, targetUserId);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  }
 }

@@ -16,7 +16,13 @@ const storage = multer.diskStorage({
       'general';
 
     const cleanFolder = rawFolderName.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
-    const fileCategory = file.mimetype.startsWith('video/') ? 'videos' : 'images';
+    const fileCategory = file.mimetype.startsWith('video/')
+      ? 'videos'
+      : file.mimetype.startsWith('image/')
+      ? 'images'
+      : file.mimetype.startsWith('audio/')
+      ? 'audios'
+      : 'documents';
     const targetDir = path.join(uploadBaseDir, 'users', cleanFolder, fileCategory);
 
     // Auto-create user-specific image and video folders if missing

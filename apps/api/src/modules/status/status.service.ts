@@ -351,4 +351,34 @@ export class StatusService {
 
     return { success: true, message: 'Status deleted successfully' };
   }
+
+  /**
+   * Toggle Mute / Unmute a specific contact's statuses
+   */
+  static async toggleMuteStatus(userId: string, targetUserId: string): Promise<any> {
+    const existing = await prisma.statusMute.findUnique({
+      where: { userId_mutedUserId: { userId, mutedUserId: targetUserId } },
+    });
+
+    if (existing) {
+      await prisma.statusMute.delete({ where: { id: existing.id } });
+      return { isMuted: false, message: 'Contact statuses unmuted' };
+    } else {
+      await prisma.statusMute.create({
+        data: { userId, mutedUserId: targetUserId },
+      });
+      return { isMuted: true, message: 'Contact statuses muted' };
+    }
+  }
+
+  /**
+   * Get list of muted contact user IDs
+   */
+  static async getMutedUserIds(userId: string): Promise<string[]> {
+    const mutes = await prisma.statusMute.findMany({
+      where: { userId },
+      select: { mutedUserId: true },
+    });
+    return mutes.map((m) => m.mutedUserId);
+  }
 }

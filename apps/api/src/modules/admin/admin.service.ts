@@ -732,5 +732,621 @@ export class AdminService {
       message: `Successfully allocated categories: [${allowedCommunities.join(', ')}] to ${user.fullName}.`,
     };
   }
+
+  // ============================================================
+  // DYNAMIC FEATURE FLAGS & MODULE MANAGEMENT
+  // ============================================================
+  static async getModulesAndFeatures() {
+    const modules = await prisma.featureModule.findMany({
+      orderBy: { sortOrder: 'asc' },
+      include: {
+        features: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            permissions: true,
+            limits: true,
+          },
+        },
+      },
+    });
+    return modules;
+  }
+
+  static async toggleFeature(key: string, isEnabled: boolean, adminUserId: string, adminName: string = 'Super Admin') {
+    const existing = await prisma.feature.findUnique({ where: { key } });
+    if (!existing) throw new Error(`Feature ${key} not found.`);
+
+    const updated = await prisma.feature.update({
+      where: { key },
+      data: { isEnabled },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: isEnabled ? 'FEATURE_ENABLED' : 'FEATURE_DISABLED',
+      targetResource: 'Feature',
+      targetId: key,
+      oldValue: { isEnabled: existing.isEnabled },
+      newValue: { isEnabled: updated.isEnabled },
+    });
+
+    return updated;
+  }
+
+  static async updateFeature(key: string, data: any, adminUserId: string, adminName: string = 'Super Admin') {
+    const existing = await prisma.feature.findUnique({ where: { key } });
+    if (!existing) throw new Error(`Feature ${key} not found.`);
+
+    const updated = await prisma.feature.update({
+      where: { key },
+      data: {
+        name: data.name ?? existing.name,
+        description: data.description ?? existing.description,
+        isEnabled: data.isEnabled ?? existing.isEnabled,
+        webEnabled: data.webEnabled ?? existing.webEnabled,
+        mobileEnabled: data.mobileEnabled ?? existing.mobileEnabled,
+        adminEnabled: data.adminEnabled ?? existing.adminEnabled,
+        userEnabled: data.userEnabled ?? existing.userEnabled,
+        businessEnabled: data.businessEnabled ?? existing.businessEnabled,
+        sortOrder: data.sortOrder ?? existing.sortOrder,
+        config: data.config ?? (existing.config as any),
+      },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: 'FEATURE_UPDATED',
+      targetResource: 'Feature',
+      targetId: key,
+      oldValue: existing,
+      newValue: updated,
+    });
+
+    return updated;
+  }
+
+  // ============================================================
+  // DYNAMIC PERMISSIONS & ROLES MANAGEMENT
+  // ============================================================
+  static async getPermissions() {
+    return prisma.permission.findMany({
+      include: { feature: true },
+      orderBy: { key: 'asc' },
+    });
+  }
+
+  static async getCustomRoles() {
+    return prisma.customRole.findMany({
+      include: {
+        permissions: {
+          include: { role: true },
+        },
+        roleLimits: true,
+        users: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  static async createOrUpdateCustomRole(data: any, adminUserId: string, adminName: string = 'Super Admin') {
+    const { id, name, description, isSystemRole, isActive, permissionKeys } = data;
+
+    let roleObj;
+    if (id) {
+      const existing = await prisma.customRole.findUnique({ where: { id } });
+      if (!existing) throw new Error('Role not found');
+      
+      // Protection for SUPER_ADMIN role
+      if (existing.name === 'SUPER_ADMIN' && isActive === false) {
+        throw new Error('SAFETY_VIOLATION: The SUPER_ADMIN role cannot be deactivated.');
+      }
+
+      roleObj = await prisma.customRole.update({
+        where: { id },
+        data: {
+          description: description ?? existing.description,
+          isActive: isActive ?? existing.isActive,
+        },
+      });
+    } else {
+      if (!name) throw new Error('Role name is required');
+      roleObj = await prisma.customRole.create({
+        data: {
+          name: name.toUpperCase().replace(/[^A_Z0-9_]/g, '_'),
+          description,
+          isSystemRole: Boolean(isSystemRole),
+          isActive: isActive !== undefined ? Boolean(isActive) : true,
+        },
+      });
+    }
+
+    if (permissionKeys && Array.isArray(permissionKeys)) {
+      // Delete existing role permissions and re-insert
+      await prisma.rolePermission.deleteMany({ where: { roleId: roleObj.id } });
+      const perms = await prisma.permission.findMany({ where: { key: { in: permissionKeys } } });
+
+      for (const p of perms) {
+        await prisma.rolePermission.create({
+          data: {
+            roleId: roleObj.id,
+            permissionKey: p.key,
+            featureKey: p.featureKey,
+          },
+        });
+      }
+    }
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: id ? 'ROLE_UPDATED' : 'ROLE_CREATED',
+      targetResource: 'CustomRole',
+      targetId: roleObj.id,
+      newValue: { name: roleObj.name, permissionKeys },
+    });
+
+    return roleObj;
+  }
+
+  static async assignUserRole(userId: string, roleId: string, adminUserId: string, adminName: string = 'Super Admin') {
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { business: true } });
+    if (!user) throw new Error('User not found');
+
+    const role = await prisma.customRole.findUnique({ where: { id: roleId } });
+    if (!role) throw new Error('Role not found');
+
+    await prisma.userRoleAssignment.upsert({
+      where: { userId_roleId: { userId, roleId } },
+      update: {},
+      create: { userId, roleId },
+    });
+
+    // Update primary assignedRole on business record for compatibility
+    if (user.business && ['SUPER_ADMIN', 'ADMIN', 'MANUFACTURER', 'DISTRIBUTOR', 'WHOLESALER', 'TRADER', 'RETAILER'].includes(role.name)) {
+      await prisma.business.update({
+        where: { id: user.business.id },
+        data: { assignedRole: role.name as any },
+      });
+    }
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: 'USER_ROLE_ASSIGNED',
+      targetResource: 'User',
+      targetId: userId,
+      newValue: { roleName: role.name },
+    });
+
+    return { message: `Successfully assigned role ${role.name} to user ${user.fullName}.` };
+  }
+
+  // ============================================================
+  // USER PERMISSION OVERRIDES
+  // ============================================================
+  static async getUserPermissionsAndOverrides(userId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        business: true,
+        subscription: true,
+      },
+    });
+    if (!user) throw new Error('User not found');
+
+    const overrides = await prisma.userPermissionOverride.findMany({ where: { userId } });
+    const userRoles = await prisma.userRoleAssignment.findMany({
+      where: { userId },
+      include: { role: { include: { permissions: true } } },
+    });
+    const limits = await prisma.userLimitOverride.findMany({ where: { userId } });
+
+    return {
+      user: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        assignedRole: user.business?.assignedRole || 'USER',
+      },
+      overrides,
+      userRoles,
+      limitOverrides: limits,
+    };
+  }
+
+  static async setUserPermissionOverride(
+    userId: string,
+    permissionKey: string,
+    featureKey: string,
+    isGranted: boolean,
+    adminUserId: string,
+    adminName: string = 'Super Admin'
+  ) {
+    const override = await prisma.userPermissionOverride.upsert({
+      where: { userId_permissionKey: { userId, permissionKey } },
+      update: { isGranted, featureKey },
+      create: { userId, permissionKey, featureKey, isGranted },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: isGranted ? 'PERMISSION_OVERRIDE_GRANTED' : 'PERMISSION_OVERRIDE_DENIED',
+      targetResource: 'UserPermissionOverride',
+      targetId: userId,
+      newValue: { permissionKey, isGranted },
+    });
+
+    return override;
+  }
+
+  static async removeUserPermissionOverride(userId: string, permissionKey: string, adminUserId: string, adminName: string = 'Super Admin') {
+    await prisma.userPermissionOverride.deleteMany({
+      where: { userId, permissionKey },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: 'PERMISSION_OVERRIDE_REMOVED',
+      targetResource: 'UserPermissionOverride',
+      targetId: userId,
+      newValue: { permissionKey },
+    });
+
+    return { message: 'Permission override removed.' };
+  }
+
+  // ============================================================
+  // DYNAMIC LIMITS MANAGEMENT
+  // ============================================================
+  static async getPlatformLimits() {
+    return prisma.platformLimit.findMany({
+      include: {
+        feature: true,
+        roleLimits: { include: { role: true } },
+      },
+      orderBy: { limitKey: 'asc' },
+    });
+  }
+
+  static async updatePlatformLimit(limitKey: string, defaultValue: number, adminUserId: string, adminName: string = 'Super Admin') {
+    const existing = await prisma.platformLimit.findUnique({ where: { limitKey } });
+    if (!existing) throw new Error('Limit not found');
+
+    const updated = await prisma.platformLimit.update({
+      where: { limitKey },
+      data: { defaultValue },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: 'LIMIT_UPDATED',
+      targetResource: 'PlatformLimit',
+      targetId: limitKey,
+      oldValue: { defaultValue: existing.defaultValue },
+      newValue: { defaultValue: updated.defaultValue },
+    });
+
+    return updated;
+  }
+
+  static async setRoleLimit(roleId: string, limitKey: string, value: number, adminUserId: string, adminName: string = 'Super Admin') {
+    const limit = await prisma.roleLimit.upsert({
+      where: { roleId_limitKey: { roleId, limitKey } },
+      update: { value },
+      create: { roleId, limitKey, value },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: 'ROLE_LIMIT_SET',
+      targetResource: 'RoleLimit',
+      targetId: roleId,
+      newValue: { limitKey, value },
+    });
+
+    return limit;
+  }
+
+  static async setUserLimitOverride(userId: string, limitKey: string, value: number, adminUserId: string, adminName: string = 'Super Admin') {
+    const limit = await prisma.userLimitOverride.upsert({
+      where: { userId_limitKey: { userId, limitKey } },
+      update: { value },
+      create: { userId, limitKey, value },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: 'USER_LIMIT_OVERRIDE_SET',
+      targetResource: 'UserLimitOverride',
+      targetId: userId,
+      newValue: { limitKey, value },
+    });
+
+    return limit;
+  }
+
+  // ============================================================
+  // DYNAMIC SUBSCRIPTION PLAN MANAGEMENT
+  // ============================================================
+  static async getDynamicSubscriptionPlans() {
+    return prisma.dynamicSubscriptionPlan.findMany({
+      include: {
+        planFeatures: { include: { feature: true } },
+        planLimits: { include: { limit: true } },
+      },
+      orderBy: { price: 'asc' },
+    });
+  }
+
+  static async createOrUpdateSubscriptionPlan(data: any, adminUserId: string, adminName: string = 'Super Admin') {
+    const { id, name, slug, description, price, durationMonths, isActive, isDefault, featureMap, limitMap } = data;
+
+    let planObj;
+    if (id) {
+      planObj = await prisma.dynamicSubscriptionPlan.update({
+        where: { id },
+        data: {
+          name: name ?? undefined,
+          description: description ?? undefined,
+          price: price !== undefined ? Number(price) : undefined,
+          durationMonths: durationMonths !== undefined ? Number(durationMonths) : undefined,
+          isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+          isDefault: isDefault !== undefined ? Boolean(isDefault) : undefined,
+        },
+      });
+    } else {
+      if (!name || !slug) throw new Error('Plan name and slug are required');
+      planObj = await prisma.dynamicSubscriptionPlan.create({
+        data: {
+          name,
+          slug: slug.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          description,
+          price: Number(price || 0),
+          durationMonths: Number(durationMonths || 1),
+          isActive: isActive !== undefined ? Boolean(isActive) : true,
+          isDefault: Boolean(isDefault),
+        },
+      });
+    }
+
+    if (featureMap && typeof featureMap === 'object') {
+      for (const [featureKey, isEnabled] of Object.entries(featureMap)) {
+        await prisma.planFeature.upsert({
+          where: { planId_featureKey: { planId: planObj.id, featureKey } },
+          update: { isEnabled: Boolean(isEnabled) },
+          create: { planId: planObj.id, featureKey, isEnabled: Boolean(isEnabled) },
+        });
+      }
+    }
+
+    if (limitMap && typeof limitMap === 'object') {
+      for (const [limitKey, value] of Object.entries(limitMap)) {
+        await prisma.planLimit.upsert({
+          where: { planId_limitKey: { planId: planObj.id, limitKey } },
+          update: { value: Number(value) },
+          create: { planId: planObj.id, limitKey, value: Number(value) },
+        });
+      }
+    }
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: id ? 'SUBSCRIPTION_PLAN_UPDATED' : 'SUBSCRIPTION_PLAN_CREATED',
+      targetResource: 'DynamicSubscriptionPlan',
+      targetId: planObj.id,
+      newValue: { name: planObj.name, price: planObj.price },
+    });
+
+    return planObj;
+  }
+
+  // ============================================================
+  // DYNAMIC PLATFORM SETTINGS & AUDIT LOGS
+  // ============================================================
+  static async getDynamicPlatformSettings() {
+    return prisma.dynamicPlatformSetting.findMany({
+      orderBy: { category: 'asc' },
+    });
+  }
+
+  static async updateDynamicPlatformSetting(key: string, value: any, adminUserId: string, adminName: string = 'Super Admin') {
+    const existing = await prisma.dynamicPlatformSetting.findUnique({ where: { key } });
+
+    const updated = await prisma.dynamicPlatformSetting.upsert({
+      where: { key },
+      update: { value },
+      create: {
+        key,
+        category: 'GENERAL',
+        value,
+        description: 'Dynamically updated setting',
+      },
+    });
+
+    const { AuthorizationService } = await import('./authz.service');
+    await AuthorizationService.logAudit({
+      adminUserId,
+      adminName,
+      action: 'PLATFORM_SETTING_UPDATED',
+      targetResource: 'DynamicPlatformSetting',
+      targetId: key,
+      oldValue: existing?.value,
+      newValue: value,
+    });
+
+    return updated;
+  }
+
+  static async getAuditLogs(limit: number = 100) {
+    return prisma.auditLog.findMany({
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // ============================================================
+  // REAL-TIME DASHBOARD METRICS & SYSTEM ANALYTICS
+  // ============================================================
+  static async getRealTimeDashboardStats() {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - 7);
+
+    const monthStart = new Date();
+    monthStart.setDate(monthStart.getDate() - 30);
+
+    const [
+      totalUsers,
+      approvedUsers,
+      pendingUsers,
+      rejectedUsers,
+      suspendedUsers,
+      deletionUsers,
+      newUsersToday,
+      newUsersWeek,
+      newUsersMonth,
+      totalBusinesses,
+      verifiedBusinesses,
+      totalProducts,
+      totalLeads,
+      totalGroups,
+      totalMessages,
+      totalCalls,
+      totalRevenue,
+      revenueToday,
+      activeSubscriptions,
+      pendingPayments,
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.user.count({ where: { status: 'APPROVED' } }),
+      prisma.user.count({ where: { status: 'PENDING' } }),
+      prisma.user.count({ where: { status: 'REJECTED' } }),
+      prisma.user.count({ where: { status: 'BLOCKED' } }),
+      prisma.user.count({ where: { isDeletionRequested: true } }),
+      prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
+      prisma.user.count({ where: { createdAt: { gte: weekStart } } }),
+      prisma.user.count({ where: { createdAt: { gte: monthStart } } }),
+      prisma.business.count(),
+      prisma.business.count({ where: { verificationTag: true } }),
+      prisma.product.count(),
+      prisma.leadCapture.count(),
+      prisma.group.count({ where: { isDeleted: false } }),
+      prisma.message.count(),
+      prisma.callLog.count(),
+      prisma.paymentTransaction.aggregate({ _sum: { amount: true }, where: { status: 'COMPLETED' } }),
+      prisma.paymentTransaction.aggregate({ _sum: { amount: true }, where: { status: 'COMPLETED', createdAt: { gte: todayStart } } }),
+      prisma.userSubscription.count({ where: { status: 'ACTIVE' } }),
+      prisma.paymentTransaction.count({ where: { status: 'PENDING_VERIFICATION' } }),
+    ]);
+
+    return {
+      users: {
+        total: totalUsers,
+        approved: approvedUsers,
+        pending: pendingUsers,
+        rejected: rejectedUsers,
+        suspended: suspendedUsers,
+        deletionRequested: deletionUsers,
+        newToday: newUsersToday,
+        newWeek: newUsersWeek,
+        newMonth: newUsersMonth,
+      },
+      business: {
+        total: totalBusinesses,
+        verified: verifiedBusinesses,
+      },
+      content: {
+        products: totalProducts,
+        leads: totalLeads,
+        groups: totalGroups,
+        messages: totalMessages,
+        calls: totalCalls,
+      },
+      revenue: {
+        total: totalRevenue._sum.amount || 0,
+        today: revenueToday._sum.amount || 0,
+        activeSubscriptions,
+        pendingPayments,
+      },
+    };
+  }
+
+  static async getSystemHealthMetrics() {
+    const memory = process.memoryUsage();
+    return {
+      apiStatus: 'ONLINE',
+      database: 'CONNECTED',
+      memoryHeapMB: Math.round(memory.heapUsed / 1024 / 1024),
+      memoryRssMB: Math.round(memory.rss / 1024 / 1024),
+      uptimeSeconds: Math.round(process.uptime()),
+      nodeVersion: process.version,
+    };
+  }
+
+  // ============================================================
+  // API ROUTE FLAGS & USER OVERRIDES
+  // ============================================================
+  static async getApiRouteFlags() {
+    return prisma.apiRouteFlag.findMany({ orderBy: { module: 'asc' } });
+  }
+
+  static async toggleApiRouteFlag(path: string, isEnabled: boolean) {
+    return prisma.apiRouteFlag.update({
+      where: { path },
+      data: { isEnabled },
+    });
+  }
+
+  static async updateApiRouteFlag(path: string, data: any) {
+    return prisma.apiRouteFlag.update({
+      where: { path },
+      data: {
+        isEnabled: data.isEnabled,
+        isRateLimitEnabled: data.isRateLimitEnabled,
+        rateLimitPerMin: data.rateLimitPerMin,
+        webEnabled: data.webEnabled,
+        mobileEnabled: data.mobileEnabled,
+        allowedRoles: data.allowedRoles,
+        allowedPlans: data.allowedPlans,
+      },
+    });
+  }
+
+  static async setUserFeatureOverride(userId: string, featureKey: string, isEnabled: boolean) {
+    return prisma.userFeatureOverride.upsert({
+      where: { userId_featureKey: { userId, featureKey } },
+      update: { isEnabled },
+      create: { userId, featureKey, isEnabled },
+    });
+  }
+
+  static async setUserApiOverride(userId: string, routePath: string, method: string, isEnabled: boolean) {
+    return prisma.userApiOverride.upsert({
+      where: { userId_routePath_method: { userId, routePath, method: method || 'ALL' } },
+      update: { isEnabled },
+      create: { userId, routePath, method: method || 'ALL', isEnabled },
+    });
+  }
 }
+
 

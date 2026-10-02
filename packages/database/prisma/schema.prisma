@@ -53,6 +53,8 @@ model User {
   status              VerificationStatus @default(UNVERIFIED)
   isDeletionRequested Boolean            @default(false)
   deletionReason      String?
+  twoFactorSecret     String?
+  isTwoFactorEnabled  Boolean            @default(false)
   
   business            Business?
   sessions            Session[]
@@ -70,6 +72,18 @@ model User {
   subscription        UserSubscription?
   paymentTransactions PaymentTransaction[]
   categoryAttributeRequests CategoryAttributeRequest[]
+  callsMade           CallLog[]          @relation("CallsMade")
+  callsReceived       CallLog[]          @relation("CallsReceived")
+  starredMessages     StarredMessage[]
+  groupJoinRequests   GroupJoinRequest[]
+  pollVotes           PollVote[]
+  privacy             UserPrivacy?
+  e2eeKey             E2EEKey?
+  pushTokens          UserPushToken[]
+  createdBroadcastLists BroadcastList[]    @relation("CreatedBroadcastLists")
+  broadcastRecipients   BroadcastRecipient[] @relation("UserBroadcastRecipients")
+  sentBroadcastMessages BroadcastMessage[] @relation("SentBroadcastMessages")
+  broadcastDeliveries   BroadcastDelivery[] @relation("UserBroadcastDeliveries")
 
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -338,10 +352,12 @@ model Group {
   hideMemberIdentity      Boolean        @default(true)
   membersCanSeeMemberList Boolean        @default(false)
   isDeleted               Boolean        @default(false)
+  inviteToken             String?        @unique
   
   createdBy               User           @relation("CreatedGroups", fields: [createdById], references: [id], onDelete: Cascade)
   members                 GroupMember[]
   messages                GroupMessage[]
+  joinRequests            GroupJoinRequest[]
   
   createdAt               DateTime       @default(now())
   updatedAt               DateTime       @updatedAt
@@ -460,6 +476,17 @@ model StatusView {
   @@index([viewerId])
 }
 
+model StatusMute {
+  id            String   @id @default(uuid())
+  userId        String
+  mutedUserId   String
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, mutedUserId])
+  @@index([userId])
+  @@index([mutedUserId])
+}
+
 model SystemSetting {
   id                                 String   @id @default("default")
   subscriptionSystemEnabled          Boolean  @default(false)
@@ -476,7 +503,30 @@ model SystemSetting {
   manualPaymentEnabled               Boolean  @default(true)
   manualPaymentWhatsapp              String   @default("+919999999999")
   
+  // Storage Controls
+  s3StorageEnabled                   Boolean  @default(false)
+  s3BucketName                       String   @default("b2b-media-uploads")
+  
+  // Two-Factor Auth Super Admin Controls
+  twoFactorAuthEnabled               Boolean  @default(false)
+  
+  // Mobile Push Notification Super Admin Controls
+  pushNotificationsEnabled           Boolean  @default(false)
+  fcmServerKey                       String?
+  
   updatedAt                          DateTime @updatedAt
+}
+
+// Mobile Device Push Tokens
+model UserPushToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String   @default("WEB") // WEB, ANDROID, IOS
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 enum SubscriptionStatus {
@@ -615,6 +665,526 @@ model Like {
   @@index([productId])
   @@index([userId])
 }
+
+// 1. Interactive In-Chat & Group Polls
+model Poll {
+  id             String       @id @default(uuid())
+  conversationId String?
+  groupId        String?
+  creatorId      String
+  question       String
+  allowMultiple  Boolean      @default(false)
+  expiresAt      DateTime?
+  options        PollOption[]
+  votes          PollVote[]
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([groupId])
+  @@index([creatorId])
+}
+
+model PollOption {
+  id     String     @id @default(uuid())
+  pollId String
+  text   String
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes  PollVote[]
+
+  @@index([pollId])
+}
+
+model PollVote {
+  id       String     @id @default(uuid())
+  pollId   String
+  optionId String
+  userId   String
+  poll     Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option   PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, optionId, userId])
+  @@index([pollId])
+  @@index([userId])
+}
+
+// 2. Starred / Bookmarked Messages
+model StarredMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  messageId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, messageId])
+  @@index([userId])
+}
+
+// 3. Group Join Requests & Admin Approval Queue
+model GroupJoinRequest {
+  id        String   @id @default(uuid())
+  groupId   String
+  userId    String
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@index([status])
+}
+
+// 4. LiveKit Call Logs
+model CallLog {
+  id           String    @id @default(uuid())
+  callerId     String
+  receiverId   String
+  callType     String    // AUDIO, VIDEO
+  status       String    // CONNECTED, MISSED, REJECTED, BUSY
+  durationSecs Int       @default(0)
+  livekitRoom  String?
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  caller       User      @relation("CallsMade", fields: [callerId], references: [id], onDelete: Cascade)
+  receiver     User      @relation("CallsReceived", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([callerId])
+  @@index([receiverId])
+  @@index([startedAt])
+}
+
+// 5. User Granular Privacy Settings
+model UserPrivacy {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  lastSeen     String   @default("EVERYONE") // EVERYONE, MY_CONTACTS, NOBODY
+  onlineStatus String   @default("EVERYONE") // EVERYONE, SAME_AS_LAST_SEEN
+  profilePhoto String   @default("EVERYONE")
+  aboutStatus  String   @default("EVERYONE")
+  groupAdd     String   @default("EVERYONE")
+  callPrivacy  String   @default("EVERYONE")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt    DateTime @updatedAt
+}
+
+// 6. End-to-End Encryption (E2EE) Keys
+model E2EEKey {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  identityKey  String
+  signedPreKey String
+  oneTimeKeys  Json
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt    DateTime @updatedAt
+}
+
+// 7. Business Quick Replies, Business Hours & Webhooks
+model QuickReply {
+  id         String   @id @default(uuid())
+  businessId String
+  shortcut   String
+  replyText  String
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model BusinessHours {
+  id         String   @id @default(uuid())
+  businessId String   @unique
+  schedule   Json
+  isClosed   Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
+}
+
+model WebhookConfig {
+  id         String       @id @default(uuid())
+  businessId String
+  targetUrl  String
+  secretKey  String
+  events     String[]
+  isActive   Boolean      @default(true)
+  logs       WebhookLog[]
+
+  @@index([businessId])
+}
+
+model WebhookLog {
+  id           String        @id @default(uuid())
+  configId     String
+  event        String
+  payload      Json
+  responseCode Int?
+  status       String        // SUCCESS, FAILED
+  createdAt    DateTime      @default(now())
+  config       WebhookConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+}
+
+// ============================================================
+// DYNAMIC AUTHORIZATION, FEATURE FLAGS, LIMITS & SYSTEM CONTROL
+// ============================================================
+
+model FeatureModule {
+  id          String    @id @default(uuid())
+  key         String    @unique // e.g. "USER_MANAGEMENT", "COMMUNICATION", "COMMERCE"
+  name        String
+  description String?
+  icon        String?   @default("📦")
+  sortOrder   Int       @default(0)
+  isActive    Boolean   @default(true)
+  features    Feature[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model Feature {
+  id              String        @id @default(uuid())
+  moduleId        String
+  key             String        @unique // e.g. "DIRECT_CHAT", "VOICE_CALLS", "PRODUCTS", "LEADS"
+  name            String
+  description     String?
+  parentKey       String?
+  isEnabled       Boolean       @default(true)
+  webEnabled      Boolean       @default(true)
+  mobileEnabled   Boolean       @default(true)
+  adminEnabled    Boolean       @default(true)
+  userEnabled     Boolean       @default(true)
+  businessEnabled Boolean       @default(true)
+  sortOrder       Int           @default(0)
+  config          Json?         // Custom JSON configuration/flags
+  module          FeatureModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  permissions     Permission[]
+  limits          PlatformLimit[]
+  planFeatures    PlanFeature[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([moduleId])
+  @@index([isEnabled])
+  @@index([key])
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  featureKey  String
+  key         String   @unique // e.g. "PRODUCT.CREATE", "USER.APPROVE", "CALL.INITIATE"
+  name        String
+  action      String   // VIEW, CREATE, READ, UPDATE, DELETE, APPROVE, REJECT, VERIFY, MANAGE, EXPORT, IMPORT, ASSIGN, PUBLISH, MODERATE
+  description String?
+  feature     Feature  @relation(fields: [featureKey], references: [key], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([featureKey])
+  @@index([action])
+}
+
+model CustomRole {
+  id           String               @id @default(uuid())
+  name         String               @unique // e.g. "SUPER_ADMIN", "ADMIN", "BUSINESS", "MODERATOR", "SALES"
+  description  String?
+  isSystemRole Boolean              @default(false)
+  isActive     Boolean              @default(true)
+  permissions  RolePermission[]
+  roleLimits   RoleLimit[]
+  users        UserRoleAssignment[]
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([isActive])
+}
+
+model RolePermission {
+  id            String     @id @default(uuid())
+  roleId        String
+  permissionKey String
+  featureKey    String
+  role          CustomRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt     DateTime   @default(now())
+
+  @@unique([roleId, permissionKey])
+  @@index([roleId])
+  @@index([permissionKey])
+  @@index([featureKey])
+}
+
+model UserRoleAssignment {
+  id        String     @id @default(uuid())
+  userId    String
+  roleId    String
+  role      CustomRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model UserPermissionOverride {
+  id            String   @id @default(uuid())
+  userId        String
+  permissionKey String
+  featureKey    String
+  isGranted     Boolean  @default(true) // true = grant override, false = deny override
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, permissionKey])
+  @@index([userId])
+  @@index([permissionKey])
+}
+
+model PlatformLimit {
+  id           String      @id @default(uuid())
+  featureKey   String
+  limitKey     String      @unique // e.g. "GROUP.MAX_MEMBERS", "POST.DAILY_MAX", "PRODUCT.MAX_COUNT", "AUDIO.MAX_DURATION_SECS"
+  name         String
+  description  String?
+  limitType    String      // DAILY, MONTHLY, LIFETIME, CONCURRENT, FILE_SIZE, DURATION, STORAGE, MEMBER
+  defaultValue Float       @default(0)
+  unit         String      @default("COUNT") // COUNT, SECONDS, MB, BYTES
+  isEnabled    Boolean     @default(true) // Dynamic Limit Flag: ON = enforce, OFF = bypass/unrestricted
+  feature      Feature     @relation(fields: [featureKey], references: [key], onDelete: Cascade)
+  roleLimits   RoleLimit[]
+  planLimits   PlanLimit[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([featureKey])
+  @@index([limitType])
+}
+
+model RoleLimit {
+  id        String        @id @default(uuid())
+  roleId    String
+  limitKey  String
+  value     Float
+  role      CustomRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  limit     PlatformLimit @relation(fields: [limitKey], references: [limitKey], onDelete: Cascade)
+
+  @@unique([roleId, limitKey])
+  @@index([roleId])
+  @@index([limitKey])
+}
+
+model UserLimitOverride {
+  id        String   @id @default(uuid())
+  userId    String
+  limitKey  String
+  value     Float
+  isEnabled Boolean? @default(true) // Optional explicit enable/disable for specific user limit
+  createdAt DateTime @default(now())
+
+  @@unique([userId, limitKey])
+  @@index([userId])
+  @@index([limitKey])
+}
+
+model ApiRouteFlag {
+  id                 String   @id @default(uuid())
+  method             String   @default("ALL") // GET, POST, PUT, DELETE, ALL
+  path               String   @unique // e.g. "/api/v1/messages", "/api/v1/calls/initiate"
+  name               String
+  module             String   @default("GENERAL") // AUTH, USER, BUSINESS, CHAT, GROUPS, CALLS, POSTS, PRODUCTS, PAYMENTS
+  isEnabled          Boolean  @default(true)
+  isRateLimitEnabled Boolean  @default(false)
+  rateLimitPerMin    Int      @default(60)
+  rateLimitPerHour   Int      @default(1000)
+  webEnabled         Boolean  @default(true)
+  mobileEnabled      Boolean  @default(true)
+  requiredPermission String?
+  allowedRoles       Json?    // Optional JSON array of role keys
+  allowedPlans       Json?    // Optional JSON array of plan slugs
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([path])
+  @@index([module])
+  @@index([isEnabled])
+}
+
+model UserFeatureOverride {
+  id         String   @id @default(uuid())
+  userId     String
+  featureKey String
+  isEnabled  Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, featureKey])
+  @@index([userId])
+  @@index([featureKey])
+}
+
+model UserApiOverride {
+  id        String   @id @default(uuid())
+  userId    String
+  routePath String
+  method    String   @default("ALL")
+  isEnabled Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, routePath, method])
+  @@index([userId])
+  @@index([routePath])
+}
+
+model DynamicSubscriptionPlan {
+  id             String        @id @default(uuid())
+  name           String
+  slug           String        @unique // e.g. "free", "basic", "premium", "enterprise"
+  description    String?
+  price          Float         @default(0)
+  currency       String        @default("INR")
+  durationMonths Int           @default(1)
+  isActive       Boolean       @default(true)
+  isDefault      Boolean       @default(false)
+  planFeatures   PlanFeature[]
+  planLimits     PlanLimit[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([isActive])
+  @@index([slug])
+}
+
+model PlanFeature {
+  id         String                  @id @default(uuid())
+  planId     String
+  featureKey String
+  isEnabled  Boolean                 @default(true)
+  plan       DynamicSubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  feature    Feature                 @relation(fields: [featureKey], references: [key], onDelete: Cascade)
+
+  @@unique([planId, featureKey])
+  @@index([planId])
+  @@index([featureKey])
+}
+
+model PlanLimit {
+  id       String                  @id @default(uuid())
+  planId   String
+  limitKey String
+  value    Float
+  plan     DynamicSubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  limit    PlatformLimit           @relation(fields: [limitKey], references: [limitKey], onDelete: Cascade)
+
+  @@unique([planId, limitKey])
+  @@index([planId])
+  @@index([limitKey])
+}
+
+model DynamicPlatformSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique // e.g. "PLATFORM_NAME", "LOGO_URL", "MAINTENANCE_MODE", "REGISTRATION_ENABLED"
+  category    String   @default("GENERAL") // GENERAL, AUTH, CHAT, CALLING, GROUPS, STORAGE, PAYMENTS, MAINTENANCE
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([key])
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  adminUserId    String
+  adminName      String
+  action         String   // e.g. "FEATURE_TOGGLED", "ROLE_CREATED", "PERMISSION_CHANGED", "LIMIT_UPDATED"
+  targetResource String
+  targetId       String?
+  oldValue       Json?
+  newValue       Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  @@index([adminUserId])
+  @@index([action])
+  @@index([targetResource])
+  @@index([createdAt])
+}
+
+// ============================================================
+// WHATSAPP-STYLE BROADCAST MESSAGING MODELS
+// ============================================================
+
+model BroadcastList {
+  id          String               @id @default(uuid())
+  title       String
+  description String?
+  creatorId   String
+  creator     User                 @relation("CreatedBroadcastLists", fields: [creatorId], references: [id], onDelete: Cascade)
+  recipients  BroadcastRecipient[]
+  messages    BroadcastMessage[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([creatorId])
+  @@index([createdAt])
+}
+
+model BroadcastRecipient {
+  id              String        @id @default(uuid())
+  broadcastListId String
+  userId          String
+  broadcastList   BroadcastList @relation(fields: [broadcastListId], references: [id], onDelete: Cascade)
+  user            User          @relation("UserBroadcastRecipients", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime      @default(now())
+
+  @@unique([broadcastListId, userId])
+  @@index([broadcastListId])
+  @@index([userId])
+}
+
+model BroadcastMessage {
+  id              String              @id @default(uuid())
+  broadcastListId String
+  senderId        String
+  text            String?
+  productCode     String?
+  mediaUrl        String?
+  mediaType       String?             // TEXT, EMOJI, IMAGE, VIDEO, DOCUMENT, AUDIO, VOICE, PRODUCT, POST, LINK
+  totalRecipients Int                 @default(0)
+  pendingCount    Int                 @default(0)
+  sentCount       Int                 @default(0)
+  deliveredCount  Int                 @default(0)
+  failedCount     Int                 @default(0)
+  status          String              @default("SENDING") // SENDING, COMPLETED, FAILED, PARTIAL
+  broadcastList   BroadcastList       @relation(fields: [broadcastListId], references: [id], onDelete: Cascade)
+  sender          User                @relation("SentBroadcastMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  deliveries      BroadcastDelivery[]
+  createdAt       DateTime            @default(now())
+
+  @@index([broadcastListId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model BroadcastDelivery {
+  id                 String           @id @default(uuid())
+  broadcastMessageId String
+  recipientId        String
+  conversationId     String?
+  messageId          String?
+  status             String           @default("PENDING") // PENDING, SENT, DELIVERED, FAILED
+  errorReason        String?
+  sentAt             DateTime?
+  broadcastMessage   BroadcastMessage @relation(fields: [broadcastMessageId], references: [id], onDelete: Cascade)
+  recipient          User             @relation("UserBroadcastDeliveries", fields: [recipientId], references: [id], onDelete: Cascade)
+  createdAt          DateTime         @default(now())
+
+  @@unique([broadcastMessageId, recipientId])
+  @@index([broadcastMessageId])
+  @@index([recipientId])
+  @@index([status])
+}
+
+
+
 
 
 

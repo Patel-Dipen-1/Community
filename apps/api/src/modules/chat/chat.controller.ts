@@ -222,6 +222,97 @@ export class ChatController {
       return res.status(500).json({ success: false, error: err.message || 'Failed to generate LiveKit token' });
     }
   }
+
+  static async createPoll(req: Request, res: Response) {
+    try {
+      const creatorId = (req as any).user.userId || (req as any).user.id;
+      const { question, options, conversationId, groupId, allowMultiple, expiresInHours } = req.body;
+
+      const { PollService } = await import('./poll.service');
+      const poll = await PollService.createPoll(creatorId, {
+        question,
+        options,
+        conversationId,
+        groupId,
+        allowMultiple,
+        expiresInHours,
+      });
+
+      const io = req.app.get('io');
+      if (io) {
+        if (conversationId) {
+          io.to(conversationId).emit('poll:created', poll);
+        } else if (groupId) {
+          io.to(`group_${groupId}`).emit('poll:created', poll);
+        }
+      }
+
+      return res.status(201).json({ success: true, poll });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
+  static async votePoll(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const pollId = req.params.id;
+      const { optionId } = req.body;
+
+      const { PollService } = await import('./poll.service');
+      const updatedPoll = await PollService.votePoll(userId, pollId, optionId);
+
+      const io = req.app.get('io');
+      if (io && updatedPoll) {
+        if (updatedPoll.conversationId) {
+          io.to(updatedPoll.conversationId).emit('poll:voted', updatedPoll);
+        } else if (updatedPoll.groupId) {
+          io.to(`group_${updatedPoll.groupId}`).emit('poll:voted', updatedPoll);
+        }
+      }
+
+      return res.status(200).json({ success: true, poll: updatedPoll });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
+  static async getPoll(req: Request, res: Response) {
+    try {
+      const pollId = req.params.id;
+      const { PollService } = await import('./poll.service');
+      const poll = await PollService.getPollDetails(pollId);
+
+      if (!poll) return res.status(404).json({ success: false, error: 'Poll not found' });
+      return res.status(200).json({ success: true, poll });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
+  static async toggleStarMessage(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const messageId = req.params.id;
+
+      const { PollService } = await import('./poll.service');
+      const result = await PollService.toggleStarMessage(userId, messageId);
+      return res.status(200).json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
+  static async getStarredMessages(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const { PollService } = await import('./poll.service');
+      const messages = await PollService.getStarredMessages(userId);
+      return res.status(200).json({ success: true, messages });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
 }
 
 

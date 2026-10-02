@@ -22,4 +22,7 @@ router.get('/:id/viewers', authenticateToken, StatusController.getViewers);
 // Delete Status
 router.delete('/:id', authenticateToken, StatusController.delete);
 
+// Mute / Unmute Contact Statuses
+router.post('/users/:id/mute', authenticateToken, StatusController.toggleMute);
+
 export default router;

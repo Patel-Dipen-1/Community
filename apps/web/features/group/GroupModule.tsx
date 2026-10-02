@@ -25,7 +25,7 @@ import {
 import { useGetProfileQuery } from '../../lib/redux/api/authApi';
 import { WhatsAppLayout } from '../../components/layout/WhatsAppLayout';
 import { Avatar, Badge, Button, Input, Toggle, SkeletonLoader } from '../../components/common/UIComponents';
-import { getSocket, joinSocketGroup, registerSocketUser } from '../../lib/socket/socketClient';
+import { getSocket, joinSocketGroup, registerSocketUser, emitTypingStart, emitTypingStop } from '../../lib/socket/socketClient';
 import { ChatMediaPreview } from '../chat/components/ChatMediaPreview';
 import { VoiceRecorder } from '../chat/components/VoiceRecorder';
 import { RichProductSkuCard } from '../products/components/RichProductSkuCard';
@@ -70,14 +70,29 @@ export default function GroupModule() {
         refetchDetails();
       }
     };
+    const handleGroupUserTyping = (data: { groupId?: string; userId: string; userName?: string; isTyping: boolean }) => {
+      if (data.groupId === selectedGroupId && data.userId) {
+        setTypingMembersMap((prev) => ({
+          ...prev,
+          [data.userId]: data.isTyping ? data.userName || 'Member' : false,
+        }));
+      }
+    };
 
     s.on('receive_group_message', handleReceiveGroupMessage);
     s.on('edit_group_message', handleEditGroupMessage);
+    s.on('user_typing', handleGroupUserTyping);
+
     return () => {
       s.off('receive_group_message', handleReceiveGroupMessage);
       s.off('edit_group_message', handleEditGroupMessage);
+      s.off('user_typing', handleGroupUserTyping);
     };
   }, [selectedGroupId, refetchDetails, refetchGroups]);
+
+  // Group Typing State
+  const [typingMembersMap, setTypingMembersMap] = useState<Record<string, string | boolean>>({});
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Local Cleared At Timestamp for Clear Chat option
   const [clearedAtTimestamp, setClearedAtTimestamp] = useState<number | null>(null);
@@ -409,11 +424,45 @@ export default function GroupModule() {
     }
   };
 
+  const handleMessageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setMessageText(val);
+
+    if (!currentUser?.id || !selectedGroupId) return;
+
+    if (val.trim().length > 0) {
+      emitTypingStart({
+        groupId: selectedGroupId,
+        userId: currentUser.id,
+        userName: currentUser.fullName,
+      });
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        emitTypingStop({
+          groupId: selectedGroupId,
+          userId: currentUser.id,
+        });
+      }, 2500);
+    } else {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      emitTypingStop({
+        groupId: selectedGroupId,
+        userId: currentUser.id,
+      });
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGroupId) return;
     if (!messageText.trim() && attachedMediaList.length === 0) return;
     setSendError('');
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    if (currentUser?.id) {
+      emitTypingStop({ groupId: selectedGroupId, userId: currentUser.id });
+    }
 
     if (editingMessage) {
       try {
@@ -693,9 +742,16 @@ export default function GroupModule() {
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-slate-400">
-                        👥 {groupDetails.currentMembersCount} / {groupDetails.maxCapacity} Members • Click for Group Info
-                      </p>
+                      {Object.entries(typingMembersMap).some(([id, val]) => val && id !== currentUser?.id) ? (
+                        <p className="text-[11px] text-emerald-400 font-bold flex items-center gap-1.5 animate-pulse">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                          {Object.entries(typingMembersMap).find(([id, val]) => val && id !== currentUser?.id)?.[1]} is typing...
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-slate-400">
+                          👥 {groupDetails.currentMembersCount} / {groupDetails.maxCapacity} Members • Click for Group Info
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -954,7 +1010,7 @@ export default function GroupModule() {
                       type="text"
                       placeholder={editingMessage ? 'Edit your message...' : 'Type a group message...'}
                       value={messageText}
-                      onChange={(e) => setMessageText(e.target.value)}
+                      onChange={handleMessageInputChange}
                       className="flex-1 bg-slate-950 text-white text-xs px-4 py-3 rounded-xl border border-slate-800 focus:outline-none focus:border-emerald-500 placeholder-slate-500"
                     />
 

@@ -26,6 +26,14 @@ import { AdminSubscriptionPanel } from '../../subscription/components/AdminSubsc
 import { AdminPaymentPanel } from '../../subscription/components/AdminPaymentPanel';
 import { AdminCategoryRequestsPanel } from './AdminCategoryRequestsPanel';
 import { CategoryManagementModule } from '../categories/CategoryManagementModule';
+import { AdminSystemSettingsPanel } from './AdminSystemSettingsPanel';
+import { AdminDashboardOverview } from './AdminDashboardOverview';
+import { AdminFeatureFlagsPanel } from './AdminFeatureFlagsPanel';
+import { AdminRolesPermissionsPanel } from './AdminRolesPermissionsPanel';
+import { AdminPlatformLimitsPanel } from './AdminPlatformLimitsPanel';
+import { AdminAuditLogsPanel } from './AdminAuditLogsPanel';
+import { AdminApiRouteFlagsPanel } from './AdminApiRouteFlagsPanel';
+import { AdminBroadcastPanel } from './AdminBroadcastPanel';
 
 const AVAILABLE_COMMUNITIES = [
   { id: 'clothing', label: 'Clothing', icon: '👕' },
@@ -38,7 +46,26 @@ const AVAILABLE_COMMUNITIES = [
 ];
 
 export function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'VERIFICATION' | 'SESSIONS' | 'USERS' | 'DELETIONS' | 'GROUPS' | 'SUBSCRIPTION' | 'PAYMENTS' | 'CATEGORY_REQUESTS' | 'CATEGORIES'>('VERIFICATION');
+  const [activeTab, setActiveTab] = useState<
+    | 'OVERVIEW'
+    | 'BROADCAST'
+    | 'FEATURE_FLAGS'
+    | 'API_ROUTES'
+    | 'ROLES_PERMISSIONS'
+    | 'LIMITS'
+    | 'AUDIT_LOGS'
+    | 'VERIFICATION'
+    | 'SESSIONS'
+    | 'USERS'
+    | 'DELETIONS'
+    | 'GROUPS'
+    | 'SUBSCRIPTION'
+    | 'PAYMENTS'
+    | 'CATEGORY_REQUESTS'
+    | 'CATEGORIES'
+    | 'SYSTEM_SETTINGS'
+  >('OVERVIEW');
+
 
   const [actionMsg, setActionMsg] = useState<string | null>(null);
 
@@ -355,67 +382,147 @@ export function AdminDashboard() {
 
           {/* Desktop Navigation Links */}
           <div className="hidden lg:flex items-center gap-3">
-            <div className="flex gap-1.5 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
+            <div className="flex gap-1 bg-slate-900 p-1.5 rounded-xl border border-slate-800 flex-wrap">
+              <button
+                onClick={() => setActiveTab('OVERVIEW')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'OVERVIEW' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                📊 Dashboard
+              </button>
+
+              <button
+                onClick={() => setActiveTab('BROADCAST')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'BROADCAST' ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-400 hover:text-white'
+                }`}
+              >
+                📢 Broadcast Control
+              </button>
+
+              <button
+                onClick={() => setActiveTab('FEATURE_FLAGS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'FEATURE_FLAGS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                🚩 Feature Flags
+              </button>
+
+              <button
+                onClick={() => setActiveTab('API_ROUTES')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'API_ROUTES' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                🌐 API Routes & Limits
+              </button>
+
+              <button
+                onClick={() => setActiveTab('ROLES_PERMISSIONS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'ROLES_PERMISSIONS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                🛡️ Roles & Perms
+              </button>
+
+              <button
+                onClick={() => setActiveTab('LIMITS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'LIMITS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                ⚡ Limits
+              </button>
+
+              <button
+                onClick={() => setActiveTab('AUDIT_LOGS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'AUDIT_LOGS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                📜 Audit Logs
+              </button>
+
               <button
                 onClick={() => setActiveTab('VERIFICATION')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'VERIFICATION' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-                  }`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'VERIFICATION' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
               >
-                📋 Registrations ({queue.length})
+                📋 Queue ({queue.length})
               </button>
+
               <button
                 onClick={() => setActiveTab('SESSIONS')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'SESSIONS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-                  }`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'SESSIONS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
               >
-                📡 Live Sessions ({sessions.length})
+                📡 Sessions ({sessions.length})
               </button>
+
               <button
                 onClick={() => setActiveTab('USERS')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'USERS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-                  }`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'USERS' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
               >
-                👥 User CRUD ({users.length})
+                👥 Users ({users.length})
               </button>
+
               <button
                 onClick={() => setActiveTab('GROUPS')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'GROUPS' ? 'bg-purple-600 text-white shadow-md' : 'text-purple-300 hover:text-white'
-                  }`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'GROUPS' ? 'bg-purple-600 text-white shadow-md' : 'text-purple-300 hover:text-white'
+                }`}
               >
-                🛡️ Group Rules ({groupsData?.length || 0})
+                🛡️ Groups
               </button>
-              <button
-                onClick={() => setActiveTab('PAYMENTS')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'PAYMENTS' ? 'bg-indigo-600 text-white shadow-md' : 'text-indigo-300 hover:text-white'
-                  }`}
-              >
-                📊 Payment Engine
-              </button>
+
               <button
                 onClick={() => setActiveTab('SUBSCRIPTION')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'SUBSCRIPTION' ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-300 hover:text-white'
-                  }`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'SUBSCRIPTION' ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-300 hover:text-white'
+                }`}
               >
-                💳 Subscription Rules
+                💳 Plans
               </button>
+
               <button
-                onClick={() => setActiveTab('CATEGORY_REQUESTS')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'CATEGORY_REQUESTS' ? 'bg-amber-600 text-white shadow-md' : 'text-amber-300 hover:text-white'
-                  }`}
+                onClick={() => setActiveTab('PAYMENTS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'PAYMENTS' ? 'bg-indigo-600 text-white shadow-md' : 'text-indigo-300 hover:text-white'
+                }`}
               >
-                🏷️ Category & Attributes
+                💰 Payments
               </button>
+
               <button
                 onClick={() => setActiveTab('CATEGORIES')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'CATEGORIES' ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-300 hover:text-white'
-                  }`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'CATEGORIES' ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-300 hover:text-white'
+                }`}
               >
-                ✨ Trade Categories (CRUD)
+                ✨ Categories
               </button>
+
+              <button
+                onClick={() => setActiveTab('SYSTEM_SETTINGS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'SYSTEM_SETTINGS' ? 'bg-purple-600 text-white shadow-md' : 'text-purple-300 hover:text-white'
+                }`}
+              >
+                ⚙️ Settings
+              </button>
+
               <button
                 onClick={() => setActiveTab('DELETIONS')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition ${activeTab === 'DELETIONS' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
-                  }`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === 'DELETIONS' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
               >
                 ⚠️ Deletions ({deletions.length})
               </button>
@@ -564,8 +671,33 @@ export function AdminDashboard() {
         <div className="p-12 text-center text-slate-400 text-xs">Loading Super Admin Data...</div>
       ) : (
         <>
+          {/* TAB 0: Real-time Dashboard Overview & Telemetry */}
+          {activeTab === 'OVERVIEW' && <AdminDashboardOverview onSelectTab={(tab) => setActiveTab(tab as any)} />}
+
+          {/* TAB 0.05: Super Admin Broadcast Control Panel */}
+          {activeTab === 'BROADCAST' && <AdminBroadcastPanel />}
+
+          {/* TAB 0.1: Dynamic Feature Flags */}
+          {activeTab === 'FEATURE_FLAGS' && <AdminFeatureFlagsPanel />}
+
+          {/* TAB 0.15: API Route Flags & Rate Limits */}
+          {activeTab === 'API_ROUTES' && <AdminApiRouteFlagsPanel />}
+
+          {/* TAB 0.2: Dynamic Roles & Permissions Engine */}
+          {activeTab === 'ROLES_PERMISSIONS' && <AdminRolesPermissionsPanel />}
+
+          {/* TAB 0.3: Dynamic Limits & Resource Quotas */}
+          {activeTab === 'LIMITS' && <AdminPlatformLimitsPanel />}
+
+          {/* TAB 0.4: Audit Trail Logs */}
+          {activeTab === 'AUDIT_LOGS' && <AdminAuditLogsPanel />}
+
+          {/* TAB 10: Super Admin Dynamic System Settings & Feature Flags */}
+          {activeTab === 'SYSTEM_SETTINGS' && <AdminSystemSettingsPanel />}
+
           {/* TAB 9: Dynamic Category & Community Management (CRUD) */}
           {activeTab === 'CATEGORIES' && <CategoryManagementModule />}
+
 
           {/* TAB 8: Custom Category & Specification Attribute Approvals */}
           {activeTab === 'CATEGORY_REQUESTS' && <AdminCategoryRequestsPanel />}

@@ -173,6 +173,187 @@ export const adminApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ['Users'],
     }),
+
+    // ---------------- DYNAMIC FEATURES, ROLES, PERMISSIONS & LIMITS ----------------
+    getModulesAndFeatures: builder.query<{ success: boolean; modules: any[] }, void>({
+      query: () => '/admin/modules',
+      providesTags: ['Features' as any],
+    }),
+
+    toggleFeature: builder.mutation<{ success: boolean; feature: any }, { key: string; isEnabled: boolean }>({
+      query: ({ key, isEnabled }) => ({
+        url: `/admin/features/${key}/toggle`,
+        method: 'PUT',
+        body: { isEnabled },
+      }),
+      invalidatesTags: ['Features' as any],
+    }),
+
+    updateFeature: builder.mutation<{ success: boolean; feature: any }, { key: string; [key: string]: any }>({
+      query: ({ key, ...body }) => ({
+        url: `/admin/features/${key}`,
+        method: 'PUT',
+        body,
+      }),
+      invalidatesTags: ['Features' as any],
+    }),
+
+    getPermissions: builder.query<{ success: boolean; permissions: any[] }, void>({
+      query: () => '/admin/permissions',
+      providesTags: ['Permissions' as any],
+    }),
+
+    getCustomRoles: builder.query<{ success: boolean; roles: any[] }, void>({
+      query: () => '/admin/roles',
+      providesTags: ['Roles' as any],
+    }),
+
+    createOrUpdateCustomRole: builder.mutation<{ success: boolean; role: any }, any>({
+      query: (body) => ({
+        url: '/admin/roles',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Roles' as any, 'Permissions' as any],
+    }),
+
+    assignUserRole: builder.mutation<{ success: boolean; message: string }, { userId: string; roleId: string }>({
+      query: (body) => ({
+        url: '/admin/roles/assign',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Users', 'Roles' as any],
+    }),
+
+    getUserPermissionsAndOverrides: builder.query<{ success: boolean; user: any; overrides: any[]; userRoles: any[]; limitOverrides: any[] }, string>({
+      query: (userId) => `/admin/users/${userId}/permissions`,
+      providesTags: ['Permissions' as any],
+    }),
+
+    setUserPermissionOverride: builder.mutation<{ success: boolean; override: any }, { userId: string; permissionKey: string; featureKey: string; isGranted: boolean }>({
+      query: ({ userId, ...body }) => ({
+        url: `/admin/users/${userId}/override-permission`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Permissions' as any],
+    }),
+
+    removeUserPermissionOverride: builder.mutation<{ success: boolean; message: string }, { userId: string; permissionKey: string }>({
+      query: ({ userId, permissionKey }) => ({
+        url: `/admin/users/${userId}/override-permission/${permissionKey}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Permissions' as any],
+    }),
+
+    getPlatformLimits: builder.query<{ success: boolean; limits: any[] }, void>({
+      query: () => '/admin/limits',
+      providesTags: ['Limits' as any],
+    }),
+
+    updatePlatformLimit: builder.mutation<{ success: boolean; limit: any }, { limitKey: string; defaultValue: number }>({
+      query: ({ limitKey, defaultValue }) => ({
+        url: `/admin/limits/${limitKey}`,
+        method: 'PUT',
+        body: { defaultValue },
+      }),
+      invalidatesTags: ['Limits' as any],
+    }),
+
+    setRoleLimit: builder.mutation<{ success: boolean; limit: any }, { roleId: string; limitKey: string; value: number }>({
+      query: ({ roleId, limitKey, value }) => ({
+        url: `/admin/roles/${roleId}/limits`,
+        method: 'POST',
+        body: { limitKey, value },
+      }),
+      invalidatesTags: ['Limits' as any, 'Roles' as any],
+    }),
+
+    setUserLimitOverride: builder.mutation<{ success: boolean; limit: any }, { userId: string; limitKey: string; value: number }>({
+      query: ({ userId, limitKey, value }) => ({
+        url: `/admin/users/${userId}/override-limit`,
+        method: 'POST',
+        body: { limitKey, value },
+      }),
+      invalidatesTags: ['Limits' as any],
+    }),
+
+    getDynamicSubscriptionPlans: builder.query<{ success: boolean; plans: any[] }, void>({
+      query: () => '/admin/subscription-plans',
+      providesTags: ['Plans' as any],
+    }),
+
+    createOrUpdateSubscriptionPlan: builder.mutation<{ success: boolean; plan: any }, any>({
+      query: (body) => ({
+        url: '/admin/subscription-plans',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Plans' as any],
+    }),
+
+    getDynamicPlatformSettings: builder.query<{ success: boolean; settings: any[] }, void>({
+      query: () => '/admin/settings',
+      providesTags: ['Settings' as any],
+    }),
+
+    updateDynamicPlatformSetting: builder.mutation<{ success: boolean; setting: any }, { key: string; value: any }>({
+      query: ({ key, value }) => ({
+        url: `/admin/settings/${key}`,
+        method: 'PUT',
+        body: { value },
+      }),
+      invalidatesTags: ['Settings' as any],
+    }),
+
+    getAuditLogs: builder.query<{ success: boolean; logs: any[] }, number | void>({
+      query: (limit) => `/admin/audit-logs${limit ? `?limit=${limit}` : ''}`,
+      providesTags: ['AuditLogs' as any],
+    }),
+
+    getRealTimeDashboardStats: builder.query<{ success: boolean; stats: any }, void>({
+      query: () => '/admin/dashboard-stats',
+      providesTags: ['DashboardStats' as any],
+    }),
+
+    getSystemHealthMetrics: builder.query<{ success: boolean; health: any }, void>({
+      query: () => '/admin/system-health',
+      providesTags: ['SystemHealth' as any],
+    }),
+
+    getApiRouteFlags: builder.query<{ success: boolean; routes: any[] }, void>({
+      query: () => '/admin/api-routes',
+      providesTags: ['ApiRoutes' as any],
+    }),
+
+    updateApiRouteFlag: builder.mutation<{ success: boolean; route: any }, { path: string; [key: string]: any }>({
+      query: ({ path, ...body }) => ({
+        url: `/admin/api-routes/update?path=${encodeURIComponent(path)}`,
+        method: 'PUT',
+        body,
+      }),
+      invalidatesTags: ['ApiRoutes' as any],
+    }),
+
+    setUserFeatureOverride: builder.mutation<{ success: boolean; override: any }, { userId: string; featureKey: string; isEnabled: boolean }>({
+      query: ({ userId, featureKey, isEnabled }) => ({
+        url: `/admin/users/${userId}/override-feature`,
+        method: 'POST',
+        body: { featureKey, isEnabled },
+      }),
+      invalidatesTags: ['Features' as any],
+    }),
+
+    setUserApiOverride: builder.mutation<{ success: boolean; override: any }, { userId: string; routePath: string; method?: string; isEnabled: boolean }>({
+      query: ({ userId, routePath, method, isEnabled }) => ({
+        url: `/admin/users/${userId}/override-api`,
+        method: 'POST',
+        body: { routePath, method, isEnabled },
+      }),
+      invalidatesTags: ['ApiRoutes' as any],
+    }),
   }),
 });
 
@@ -192,5 +373,31 @@ export const {
   useUpdateCommunityMutation,
   useDeleteCommunityMutation,
   useAllocateCommunitiesMutation,
+  useGetModulesAndFeaturesQuery,
+  useToggleFeatureMutation,
+  useUpdateFeatureMutation,
+  useGetPermissionsQuery,
+  useGetCustomRolesQuery,
+  useCreateOrUpdateCustomRoleMutation,
+  useAssignUserRoleMutation,
+  useGetUserPermissionsAndOverridesQuery,
+  useSetUserPermissionOverrideMutation,
+  useRemoveUserPermissionOverrideMutation,
+  useGetPlatformLimitsQuery,
+  useUpdatePlatformLimitMutation,
+  useSetRoleLimitMutation,
+  useSetUserLimitOverrideMutation,
+  useGetDynamicSubscriptionPlansQuery,
+  useCreateOrUpdateSubscriptionPlanMutation,
+  useGetDynamicPlatformSettingsQuery,
+  useUpdateDynamicPlatformSettingMutation,
+  useGetAuditLogsQuery,
+  useGetRealTimeDashboardStatsQuery,
+  useGetSystemHealthMetricsQuery,
+  useGetApiRouteFlagsQuery,
+  useUpdateApiRouteFlagMutation,
+  useSetUserFeatureOverrideMutation,
+  useSetUserApiOverrideMutation,
 } = adminApi;
+
 

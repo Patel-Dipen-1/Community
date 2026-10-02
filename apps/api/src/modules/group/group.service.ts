@@ -873,4 +873,169 @@ export class GroupService {
 
     return updated;
   }
+
+  static async getOrCreateInviteToken(groupId: string, userId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { members: true },
+    });
+
+    if (!group || group.isDeleted) throw new Error('Group not found');
+
+    const member = group.members.find((m) => m.userId === userId);
+    if (!member || member.roleInGroup !== 'ADMIN') {
+      throw new Error('UNAUTHORIZED: Only group admins can generate invite links');
+    }
+
+    if (group.inviteToken) {
+      return { inviteToken: group.inviteToken };
+    }
+
+    const inviteToken = `grp_inv_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    await prisma.group.update({
+      where: { id: groupId },
+      data: { inviteToken },
+    });
+
+    return { inviteToken };
+  }
+
+  static async joinViaInviteToken(userId: string, inviteToken: string) {
+    const group = await prisma.group.findUnique({
+      where: { inviteToken },
+      include: { members: true },
+    });
+
+    if (!group || group.isDeleted) throw new Error('INVITE_INVALID: Invalid or expired group invite link');
+
+    if (group.members.length >= group.maxCapacity) {
+      throw new Error(`GROUP_FULL: Group capacity limit reached (${group.members.length}/${group.maxCapacity})`);
+    }
+
+    const isMember = group.members.some((m) => m.userId === userId);
+    if (isMember) {
+      return { message: 'Already a member', group };
+    }
+
+    await prisma.groupMember.create({
+      data: {
+        groupId: group.id,
+        userId,
+        roleInGroup: 'MEMBER',
+      },
+    });
+
+    return { message: `Joined ${group.title} successfully`, group };
+  }
+
+  static async createJoinRequest(groupId: string, userId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { members: true },
+    });
+
+    if (!group || group.isDeleted) throw new Error('Group not found');
+
+    const isMember = group.members.some((m) => m.userId === userId);
+    if (isMember) throw new Error('Already a member of this group');
+
+    const existingReq = await prisma.groupJoinRequest.findUnique({
+      where: { groupId_userId: { groupId, userId } },
+    });
+
+    if (existingReq) {
+      if (existingReq.status === 'PENDING') return { message: 'Join request already pending', request: existingReq };
+      if (existingReq.status === 'REJECTED') {
+        const updated = await prisma.groupJoinRequest.update({
+          where: { id: existingReq.id },
+          data: { status: 'PENDING' },
+        });
+        return { message: 'Join request resubmitted', request: updated };
+      }
+    }
+
+    const request = await prisma.groupJoinRequest.create({
+      data: { groupId, userId, status: 'PENDING' },
+    });
+
+    return { message: 'Join request submitted for admin approval', request };
+  }
+
+  static async getPendingJoinRequests(groupId: string, adminUserId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { members: true },
+    });
+
+    if (!group || group.isDeleted) throw new Error('Group not found');
+
+    const admin = group.members.find((m) => m.userId === adminUserId);
+    if (!admin || admin.roleInGroup !== 'ADMIN') {
+      throw new Error('UNAUTHORIZED: Only group admins can review join requests');
+    }
+
+    const requests = await prisma.groupJoinRequest.findMany({
+      where: { groupId, status: 'PENDING' },
+      include: { user: { select: { id: true, fullName: true, mobileNumber: true, avatar: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return requests;
+  }
+
+  static async approveJoinRequest(groupId: string, requestId: string, adminUserId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { members: true },
+    });
+
+    if (!group || group.isDeleted) throw new Error('Group not found');
+
+    const admin = group.members.find((m) => m.userId === adminUserId);
+    if (!admin || admin.roleInGroup !== 'ADMIN') {
+      throw new Error('UNAUTHORIZED: Only group admins can approve requests');
+    }
+
+    const req = await prisma.groupJoinRequest.findUnique({ where: { id: requestId } });
+    if (!req || req.groupId !== groupId) throw new Error('Request not found');
+
+    if (group.members.length >= group.maxCapacity) {
+      throw new Error('GROUP_FULL: Cannot approve request. Group max capacity reached.');
+    }
+
+    await prisma.$transaction([
+      prisma.groupJoinRequest.update({
+        where: { id: requestId },
+        data: { status: 'APPROVED' },
+      }),
+      prisma.groupMember.upsert({
+        where: { groupId_userId: { groupId, userId: req.userId } },
+        update: {},
+        create: { groupId, userId: req.userId, roleInGroup: 'MEMBER' },
+      }),
+    ]);
+
+    return { message: 'Join request approved and member added successfully' };
+  }
+
+  static async rejectJoinRequest(groupId: string, requestId: string, adminUserId: string) {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { members: true },
+    });
+
+    if (!group || group.isDeleted) throw new Error('Group not found');
+
+    const admin = group.members.find((m) => m.userId === adminUserId);
+    if (!admin || admin.roleInGroup !== 'ADMIN') {
+      throw new Error('UNAUTHORIZED: Only group admins can reject requests');
+    }
+
+    await prisma.groupJoinRequest.update({
+      where: { id: requestId },
+      data: { status: 'REJECTED' },
+    });
+
+    return { message: 'Join request rejected' };
+  }
 }

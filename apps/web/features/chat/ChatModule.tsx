@@ -23,8 +23,16 @@ import { Avatar, Badge, Button, Input, SkeletonLoader } from '../../components/c
 import { CallModal } from './components/CallModal';
 import { ChatMediaPreview } from './components/ChatMediaPreview';
 import { VoiceRecorder } from './components/VoiceRecorder';
+import {
+  useGetUserBroadcastListsQuery,
+  useGetBroadcastDetailsQuery,
+  useSendBroadcastMessageMutation,
+} from '../../lib/redux/api/broadcastApi';
+import { NewBroadcastModal } from './components/NewBroadcastModal';
+import { BroadcastInfoModal } from './components/BroadcastInfoModal';
+import { BroadcastPreviewModal } from './components/BroadcastPreviewModal';
 import { uploadSingleFile, uploadMultipleFiles } from '../../lib/utils/upload';
-import { getSocket, registerSocketUser, joinSocketConversation } from '../../lib/socket/socketClient';
+import { getSocket, registerSocketUser, joinSocketConversation, emitTypingStart, emitTypingStop, requestUserPresence } from '../../lib/socket/socketClient';
 
 const AVAILABLE_COMMUNITIES = [
   { id: 'clothing', label: 'Clothing & Textiles', icon: '👕' },
@@ -51,13 +59,21 @@ export function ChatModule() {
   const currentUser = profileData?.user;
   const isApprovedUser = currentUser?.status === 'APPROVED' || currentUser?.isVerified;
 
-  // Active Tab View in Left Panel (chats, contacts, communities)
-  const [activeLeftTab, setActiveLeftTab] = useState<'chats' | 'contacts' | 'communities'>(
-    initialTabParam === 'contacts' ? 'contacts' : initialTabParam === 'communities' ? 'communities' : 'chats'
+  // Active Tab View in Left Panel (chats, broadcasts, contacts, communities)
+  const [activeLeftTab, setActiveLeftTab] = useState<'chats' | 'broadcasts' | 'contacts' | 'communities'>(
+    initialTabParam === 'contacts' ? 'contacts' : initialTabParam === 'communities' ? 'communities' : initialTabParam === 'broadcasts' ? 'broadcasts' : 'chats'
   );
 
   // Mobile View Toggle
   const [mobileView, setMobileView] = useState<'LIST' | 'CHAT'>('LIST');
+
+  // Broadcast List State & Modals
+  const [activeBroadcastId, setActiveBroadcastId] = useState<string | null>(null);
+  const [isNewBroadcastModalOpen, setIsNewBroadcastModalOpen] = useState(false);
+  const [isBroadcastInfoModalOpen, setIsBroadcastInfoModalOpen] = useState(false);
+  const [isBroadcastPreviewOpen, setIsBroadcastPreviewOpen] = useState(false);
+  const [broadcastVoiceUrl, setBroadcastVoiceUrl] = useState<string | null>(null);
+  const [broadcastProgress, setBroadcastProgress] = useState<{ sentCount: number; totalRecipients: number; status: string } | null>(null);
 
   // Search Approved Users State
   const [searchQuery, setSearchQuery] = useState('');
@@ -112,13 +128,28 @@ export function ChatModule() {
     activeConversationId || '',
     {
       skip: !activeConversationId || !isApprovedUser,
-      pollingInterval: 8000, // Socket.IO handles instant updates, polling kept as lightweight fallback
+      pollingInterval: 8000,
     }
   );
 
+  // Broadcast RTK Query Hooks
+  const { data: broadcastListsData, isLoading: isBroadcastListsLoading, refetch: refetchBroadcastLists } =
+    useGetUserBroadcastListsQuery(undefined, {
+      skip: !isApprovedUser,
+    });
+
+  const { data: activeBroadcastData, isLoading: isBroadcastDetailsLoading, refetch: refetchBroadcastDetails } =
+    useGetBroadcastDetailsQuery(activeBroadcastId || '', {
+      skip: !activeBroadcastId || !isApprovedUser,
+    });
+
   const [startConversation, { isLoading: isStartingChat }] = useStartConversationMutation();
   const [sendMessage, { isLoading: isSendingMessage }] = useSendMessageMutation();
+  const [sendBroadcastMessage, { isLoading: isSendingBroadcast }] = useSendBroadcastMessageMutation();
   const [editMessageMutation, { isLoading: isEditingMessage }] = useEditMessageMutation();
+
+  const broadcastLists = broadcastListsData?.broadcastLists || [];
+  const activeBroadcastList = activeBroadcastData?.broadcastList;
 
   const conversations = conversationsData?.conversations || [];
   const messages = activeChatData?.messages || [];
@@ -127,11 +158,63 @@ export function ChatModule() {
   const selectedConversation = conversations.find((c) => c.conversationId === activeConversationId);
   const currentParticipant = activeParticipant || selectedConversation?.participant;
 
-  // Real-Time Socket.IO Listener for instant 1-to-1 message updates
+  // User Presence & Typing State
+  const [presenceMap, setPresenceMap] = useState<Record<string, { status: 'ONLINE' | 'OFFLINE'; lastSeen?: string | null }>>({});
+  const [typingUsersMap, setTypingUsersMap] = useState<Record<string, boolean>>({});
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Real-Time Socket.IO Listener for instant 1-to-1 message updates, presence & typing
   useEffect(() => {
     if (!currentUser?.id) return;
     registerSocketUser(currentUser.id);
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    const s = getSocket();
+
+    const handlePresenceChange = (data: { userId: string; status: 'ONLINE' | 'OFFLINE'; lastSeen?: string | null }) => {
+      if (!data?.userId) return;
+      setPresenceMap((prev) => ({
+        ...prev,
+        [data.userId]: { status: data.status, lastSeen: data.lastSeen },
+      }));
+    };
+
+    const handlePresenceStatus = (data: { userId: string; status: 'ONLINE' | 'OFFLINE'; lastSeen?: string | null }) => {
+      if (!data?.userId) return;
+      setPresenceMap((prev) => ({
+        ...prev,
+        [data.userId]: { status: data.status, lastSeen: data.lastSeen },
+      }));
+    };
+
+    const handleUserTyping = (data: { conversationId?: string; groupId?: string; userId: string; isTyping: boolean }) => {
+      if (!data?.userId) return;
+      if (!data.conversationId || data.conversationId === activeConversationId) {
+        setTypingUsersMap((prev) => ({
+          ...prev,
+          [data.userId]: data.isTyping,
+        }));
+      }
+    };
+
+    s.on('user_presence_change', handlePresenceChange);
+    s.on('user_presence_status', handlePresenceStatus);
+    s.on('user_typing', handleUserTyping);
+
+    return () => {
+      s.off('user_presence_change', handlePresenceChange);
+      s.off('user_presence_status', handlePresenceStatus);
+      s.off('user_typing', handleUserTyping);
+    };
+  }, [activeConversationId]);
+
+  // Query presence when active participant changes
+  useEffect(() => {
+    if (currentParticipant?.userId) {
+      requestUserPresence(currentParticipant.userId);
+    }
+  }, [currentParticipant?.userId]);
 
   useEffect(() => {
     if (!activeConversationId) return;
@@ -301,6 +384,49 @@ export function ChatModule() {
     addToast('🧹 Chat history cleared for your view.', 'info');
   };
 
+  const formatLastSeen = (isoString?: string | null) => {
+    if (!isoString) return 'recently';
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return 'recently';
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const handleMessageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setMessageText(val);
+
+    if (!currentUser?.id || !activeConversationId) return;
+
+    if (val.trim().length > 0) {
+      emitTypingStart({
+        conversationId: activeConversationId,
+        userId: currentUser.id,
+        userName: currentUser.fullName,
+      });
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        emitTypingStop({
+          conversationId: activeConversationId,
+          userId: currentUser.id,
+        });
+      }, 2500);
+    } else {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      emitTypingStop({
+        conversationId: activeConversationId,
+        userId: currentUser.id,
+      });
+    }
+  };
+
   const handleStartEditMessage = (msg: any) => {
     if (msg.senderId !== currentUser?.id) return;
     setEditingMessage({ id: msg.id, text: msg.text || '' });
@@ -339,10 +465,18 @@ export function ChatModule() {
   };
 
   const handleSendVoiceNote = async (url: string) => {
-    if (!activeConversationId) return;
+    if (!activeConversationId && !activeBroadcastId) return;
+
+    if (activeBroadcastId) {
+      setBroadcastVoiceUrl(url);
+      setIsVoiceRecorderOpen(false);
+      setIsBroadcastPreviewOpen(true);
+      return;
+    }
+
     try {
       const res = await sendMessage({
-        conversationId: activeConversationId,
+        conversationId: activeConversationId!,
         mediaUrl: url,
       }).unwrap();
 
@@ -354,6 +488,48 @@ export function ChatModule() {
       }
     } catch (err: any) {
       addToast(`❌ Failed to send voice note`, 'error');
+    }
+  };
+
+  const handleConfirmBroadcastSend = async () => {
+    if (!activeBroadcastId) return;
+    try {
+      const firstMedia = attachedMediaList[0];
+      let mediaType = 'TEXT';
+      if (broadcastVoiceUrl) {
+        mediaType = 'VOICE';
+      } else if (firstMedia) {
+        const lower = firstMedia.url.toLowerCase();
+        if (lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.mov')) mediaType = 'VIDEO';
+        else if (lower.endsWith('.pdf') || lower.endsWith('.doc') || lower.endsWith('.docx') || lower.endsWith('.xls') || lower.endsWith('.xlsx') || lower.endsWith('.zip')) mediaType = 'DOCUMENT';
+        else if (lower.endsWith('.mp3') || lower.endsWith('.ogg') || lower.endsWith('.wav')) mediaType = 'AUDIO';
+        else mediaType = 'IMAGE';
+      } else if (productCodeInput) {
+        mediaType = 'PRODUCT';
+      }
+
+      const res = await sendBroadcastMessage({
+        id: activeBroadcastId,
+        text: messageText.trim() || undefined,
+        productCode: productCodeInput.trim() || undefined,
+        mediaUrl: broadcastVoiceUrl || firstMedia?.url,
+        mediaType,
+        attachments: attachedMediaList.length > 0 ? attachedMediaList.map((m) => ({ url: m.url })) : undefined,
+      }).unwrap();
+
+      if (res.success) {
+        setMessageText('');
+        setAttachedMediaList([]);
+        setUploadingFileName(null);
+        setBroadcastVoiceUrl(null);
+        setIsBroadcastPreviewOpen(false);
+        if (!productCodeParam) setProductCodeInput('');
+        refetchBroadcastDetails();
+        refetchBroadcastLists();
+        addToast(`📢 Broadcast dispatched to ${res.totalRecipients || 0} contacts privately!`, 'success');
+      }
+    } catch (err: any) {
+      addToast(`❌ ${err?.data?.error || err?.message || 'Failed to send broadcast message'}`, 'error');
     }
   };
 
@@ -372,7 +548,12 @@ export function ChatModule() {
 
   const handleSendMessageSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeConversationId) return;
+    if (!activeConversationId && !activeBroadcastId) return;
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    if (currentUser?.id && activeConversationId) {
+      emitTypingStop({ conversationId: activeConversationId, userId: currentUser.id });
+    }
 
     if (editingMessage) {
       await handleSaveEdit();
@@ -384,11 +565,19 @@ export function ChatModule() {
       return;
     }
 
+    // 📢 Open Broadcast Preview Modal before sending
+    if (activeBroadcastId) {
+      setBroadcastVoiceUrl(null);
+      setIsBroadcastPreviewOpen(true);
+      return;
+    }
+
     try {
+      // 💬 Handle 1-to-1 Chat Message Dispatch
       if (attachedMediaList.length > 0) {
         const firstMedia = attachedMediaList[0];
         const res = await sendMessage({
-          conversationId: activeConversationId,
+          conversationId: activeConversationId!,
           text: messageText.trim() || undefined,
           productCode: productCodeInput.trim() || undefined,
           mediaUrl: firstMedia.url,
@@ -396,7 +585,7 @@ export function ChatModule() {
 
         for (let i = 1; i < attachedMediaList.length; i++) {
           await sendMessage({
-            conversationId: activeConversationId,
+            conversationId: activeConversationId!,
             mediaUrl: attachedMediaList[i].url,
           }).unwrap();
         }
@@ -414,7 +603,7 @@ export function ChatModule() {
         }
       } else {
         const res = await sendMessage({
-          conversationId: activeConversationId,
+          conversationId: activeConversationId!,
           text: messageText.trim() || undefined,
           productCode: productCodeInput.trim() || undefined,
         }).unwrap();
@@ -430,8 +619,7 @@ export function ChatModule() {
         }
       }
     } catch (err: any) {
-      const errMsg = err?.data?.error || 'Failed to send message';
-      addToast(`❌ ${errMsg}`, 'error');
+      addToast(`❌ ${err?.data?.error || err?.message || 'Failed to send message'}`, 'error');
     }
   };
 
@@ -526,6 +714,13 @@ export function ChatModule() {
             </div>
 
             <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setIsNewBroadcastModalOpen(true)}
+                className="p-2 px-2.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold hover:bg-emerald-600 hover:text-white transition flex items-center gap-1"
+                title="Create New Broadcast List"
+              >
+                <span>📢</span> New Broadcast
+              </button>
               <Link
                 href="/groups"
                 className="p-2 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-bold hover:bg-purple-600 hover:text-white transition"
@@ -540,18 +735,31 @@ export function ChatModule() {
           <div className="p-2 bg-slate-900 border-b border-slate-800 flex gap-1">
             <button
               onClick={() => setActiveLeftTab('chats')}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${
                 activeLeftTab === 'chats'
                   ? 'bg-emerald-600 text-slate-950 shadow'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
               <span>💬 Chats</span>
-              <span className="text-[10px] bg-slate-950/40 px-1.5 rounded-full font-bold">{conversations.length}</span>
+              <span className="text-[10px] bg-slate-950/40 px-1 rounded-full font-bold">{conversations.length}</span>
             </button>
+
+            <button
+              onClick={() => setActiveLeftTab('broadcasts')}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${
+                activeLeftTab === 'broadcasts'
+                  ? 'bg-emerald-600 text-slate-950 shadow'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <span>📢 Broadcasts</span>
+              <span className="text-[10px] bg-slate-950/40 px-1 rounded-full font-bold">{broadcastLists.length}</span>
+            </button>
+
             <button
               onClick={() => setActiveLeftTab('contacts')}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${
                 activeLeftTab === 'contacts'
                   ? 'bg-emerald-600 text-slate-950 shadow'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -559,9 +767,10 @@ export function ChatModule() {
             >
               <span>🔍 Contacts</span>
             </button>
+
             <button
               onClick={() => setActiveLeftTab('communities')}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${
                 activeLeftTab === 'communities'
                   ? 'bg-emerald-600 text-slate-950 shadow'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -672,6 +881,71 @@ export function ChatModule() {
             </div>
           )}
 
+          {/* TAB 1.5: BROADCAST LISTS */}
+          {activeLeftTab === 'broadcasts' && (
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60">
+              {isBroadcastListsLoading ? (
+                <div className="p-8 text-center text-xs text-slate-500 animate-pulse">Loading broadcast lists...</div>
+              ) : broadcastLists.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500 space-y-3">
+                  <div className="text-3xl">📢</div>
+                  <p className="font-semibold text-slate-300">No broadcast lists created yet.</p>
+                  <button
+                    onClick={() => setIsNewBroadcastModalOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 text-slate-950 font-bold text-xs shadow-md"
+                  >
+                    ➕ Create New Broadcast List
+                  </button>
+                </div>
+              ) : (
+                broadcastLists.map((list) => {
+                  const isSelected = activeBroadcastId === list.id;
+                  const lastMsgTime = list.lastMessage?.createdAt || list.updatedAt;
+
+                  return (
+                    <div
+                      key={list.id}
+                      onClick={() => {
+                        setActiveBroadcastId(list.id);
+                        setActiveConversationId(null);
+                        setMobileView('CHAT');
+                      }}
+                      className={`p-3.5 flex items-start gap-3 transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-950/40 border-l-4 border-emerald-500'
+                          : 'hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <div className="w-11 h-11 rounded-2xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 font-bold flex items-center justify-center text-lg flex-shrink-0">
+                        👥
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                          <h3 className="font-bold text-xs text-white truncate">
+                            {list.title}
+                          </h3>
+                          <span className="text-[10px] text-slate-500 flex-shrink-0">
+                            {lastMsgTime
+                              ? new Date(lastMsgTime).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : ''}
+                          </span>
+                        </div>
+
+                        <p className="text-[11px] text-slate-400">
+                          {list.recipientCount} recipients • Private Broadcast
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
           {/* TAB 2: CONTACTS DIRECTORY */}
           {activeLeftTab === 'contacts' && (
             <div className="flex-1 overflow-y-auto space-y-2 p-3">
@@ -760,16 +1034,71 @@ export function ChatModule() {
             mobileView === 'LIST' ? 'hidden md:flex' : 'flex'
           } flex-1 flex-col bg-slate-950 h-full overflow-hidden`}
         >
-          {!activeConversationId ? (
+          {!activeConversationId && !activeBroadcastId ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-950">
               <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center text-4xl mb-4 border border-emerald-500/20 shadow-inner">
                 💬
               </div>
               <h3 className="text-lg font-bold text-white mb-2">B2B Real-Time Messenger</h3>
               <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
-                Select a conversation from the left or search approved business members to start real-time messaging.
+                Select a 1-to-1 conversation, a Broadcast list, or search approved business members to start messaging.
               </p>
             </div>
+          ) : activeBroadcastId ? (
+            <>
+              {/* WhatsApp-Style Broadcast List Chat Header */}
+              <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2 z-10 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setMobileView('LIST')}
+                    className="md:hidden p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+                  >
+                    ←
+                  </button>
+
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 font-bold flex items-center justify-center text-lg">
+                    👥
+                  </div>
+
+                  <div>
+                    <h2 className="font-bold text-sm text-white flex items-center gap-1.5">
+                      <span>{activeBroadcastList?.title || 'Broadcast List'}</span>
+                    </h2>
+                    <p className="text-[11px] text-emerald-400 font-semibold">
+                      👥 {activeBroadcastList?.recipientCount || 0} recipients
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsBroadcastInfoModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 border border-emerald-500/30 transition flex items-center gap-1"
+                  >
+                    <span>ℹ️</span> Info & Recipients
+                  </button>
+
+                  <button
+                    onClick={() => setIsBroadcastInfoModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 border border-indigo-500/30 transition flex items-center gap-1"
+                  >
+                    <span>✏️</span> Edit Recipients
+                  </button>
+                </div>
+              </div>
+
+              {/* Broadcast Notification Banner */}
+              <div className="bg-emerald-950/40 px-4 py-2 border-b border-emerald-900/40 flex items-center justify-between text-xs text-emerald-300">
+                <span className="flex items-center gap-1.5 font-semibold">
+                  <span>📢</span> Broadcast List • Messages are delivered as private 1-to-1 messages to every recipient.
+                </span>
+                {isSendingBroadcast && (
+                  <span className="animate-pulse font-bold text-emerald-400">
+                    Sending broadcast...
+                  </span>
+                )}
+              </div>
+            </>
           ) : (
             <>
               {/* WhatsApp Style Chat Top Header with CALL BUTTONS */}
@@ -792,9 +1121,25 @@ export function ChatModule() {
                       <span>{currentParticipant?.fullName || 'Business Member'}</span>
                       <span className="text-emerald-400 text-xs">✓</span>
                     </h2>
-                    <p className="text-[11px] text-slate-400">
-                      {currentParticipant?.shopName || 'Verified Vendor'} • {currentParticipant?.mobileNumber || 'Online'}
-                    </p>
+                    {typingUsersMap[currentParticipant?.userId || ''] ? (
+                      <p className="text-[11px] text-emerald-400 font-bold flex items-center gap-1.5 animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                        Typing...
+                      </p>
+                    ) : presenceMap[currentParticipant?.userId || '']?.status === 'ONLINE' ? (
+                      <p className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                        Online
+                      </p>
+                    ) : presenceMap[currentParticipant?.userId || '']?.lastSeen ? (
+                      <p className="text-[11px] text-slate-400">
+                        Last seen {formatLastSeen(presenceMap[currentParticipant?.userId || '']?.lastSeen)}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-400">
+                        {currentParticipant?.shopName || 'Verified Vendor'} • Offline
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -887,7 +1232,57 @@ export function ChatModule() {
 
               {/* Messages Container */}
               <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]">
-                {isMessagesLoading && messages.length === 0 ? (
+                {activeBroadcastId ? (
+                  isBroadcastDetailsLoading ? (
+                    <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">
+                      📢 Fetching broadcast messages...
+                    </div>
+                  ) : (activeBroadcastList?.messages || []).length === 0 ? (
+                    <div className="text-center py-16 text-xs text-slate-400 space-y-2">
+                      <div className="text-4xl mb-2">📢</div>
+                      <p className="font-bold text-white text-sm">No broadcast messages sent yet.</p>
+                      <p className="text-slate-400 max-w-sm mx-auto">
+                        Type your message in the composer below. Every recipient in this broadcast list will receive an individual 1-to-1 message privately.
+                      </p>
+                    </div>
+                  ) : (
+                    (activeBroadcastList?.messages || []).map((msg: any) => (
+                      <div key={msg.id} className="flex flex-col items-end">
+                        <div className="max-w-md bg-emerald-950/80 border border-emerald-700/60 text-white p-3.5 rounded-2xl rounded-tr-none shadow-md space-y-2">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-emerald-300 border-b border-emerald-800/80 pb-1.5">
+                            <span className="flex items-center gap-1">📢 Broadcast Sent</span>
+                            <span className="px-2 py-0.5 bg-emerald-900/60 rounded text-[10px]">
+                              {msg.totalRecipients} Recipients
+                            </span>
+                          </div>
+
+                          {msg.text && <p className="text-xs whitespace-pre-wrap leading-relaxed">{msg.text}</p>}
+
+                          {msg.mediaUrl && (
+                            <div className="rounded-xl overflow-hidden border border-emerald-800">
+                              <ChatMediaPreview mediaUrl={msg.mediaUrl} />
+                            </div>
+                          )}
+
+                          {msg.productCode && (
+                            <div className="p-2 bg-slate-950 rounded-xl border border-emerald-800">
+                              <span className="text-xs font-mono text-emerald-400 font-bold">📦 SKU: {msg.productCode}</span>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between text-[10px] text-emerald-300/80 pt-1.5 border-t border-emerald-800/60">
+                            <span>
+                              {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span className="font-bold">
+                              Status: {msg.status} ({msg.sentCount}/{msg.totalRecipients} sent)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )
+                ) : isMessagesLoading && messages.length === 0 ? (
                   <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">
                     💬 Fetching chat history...
                   </div>
@@ -1189,7 +1584,7 @@ export function ChatModule() {
                       type="text"
                       placeholder={editingMessage ? 'Update message text...' : 'Type a message...'}
                       value={messageText}
-                      onChange={(e) => setMessageText(e.target.value)}
+                      onChange={handleMessageInputChange}
                       className="flex-1 bg-slate-950 text-white text-xs px-4 py-3 rounded-xl border border-slate-800 focus:outline-none focus:border-emerald-500 placeholder-slate-500"
                     />
 
@@ -1236,6 +1631,46 @@ export function ChatModule() {
           </div>
         </div>
       )}
+
+      {/* New Broadcast List Creation Modal */}
+      <NewBroadcastModal
+        isOpen={isNewBroadcastModalOpen}
+        onClose={() => setIsNewBroadcastModalOpen(false)}
+        onCreated={(id) => {
+          setActiveBroadcastId(id);
+          setActiveConversationId(null);
+          setMobileView('CHAT');
+        }}
+      />
+
+      {/* Broadcast Info & Recipient Management Modal */}
+      <BroadcastInfoModal
+        isOpen={isBroadcastInfoModalOpen}
+        broadcastListId={activeBroadcastId || ''}
+        onClose={() => setIsBroadcastInfoModalOpen(false)}
+        onDeleted={() => {
+          setActiveBroadcastId(null);
+          setMobileView('LIST');
+        }}
+      />
+
+      {/* Broadcast Preview Confirmation Modal */}
+      <BroadcastPreviewModal
+        isOpen={isBroadcastPreviewOpen}
+        listTitle={activeBroadcastList?.title || 'Broadcast List'}
+        recipientCount={activeBroadcastList?.recipientCount || 0}
+        text={messageText}
+        productCode={productCodeInput}
+        attachedMediaList={attachedMediaList}
+        isVoiceNote={Boolean(broadcastVoiceUrl)}
+        voiceUrl={broadcastVoiceUrl || undefined}
+        onCancel={() => {
+          setIsBroadcastPreviewOpen(false);
+          setBroadcastVoiceUrl(null);
+        }}
+        onConfirmSend={handleConfirmBroadcastSend}
+        isSending={isSendingBroadcast}
+      />
     </WhatsAppLayout>
   );
 }

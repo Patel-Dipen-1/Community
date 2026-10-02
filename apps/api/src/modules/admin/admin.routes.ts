@@ -37,5 +37,50 @@ router.post('/users/:userId/allocate-categories', AdminController.allocateCommun
 // Super Admin Group Capacity Configuration Endpoint
 router.post('/groups/capacity', AdminController.updateGroupCapacity);
 
+// Super Admin Global 2FA Enable/Disable Toggle
+router.post('/2fa-toggle', AdminController.toggle2FA);
+
+// Dynamic Modules & Feature Flags
+router.get('/modules', AdminController.getModulesAndFeatures);
+router.put('/features/:key/toggle', AdminController.toggleFeature);
+router.put('/features/:key', AdminController.updateFeature);
+
+// Dynamic Permissions & Custom Roles
+router.get('/permissions', AdminController.getPermissions);
+router.get('/roles', AdminController.getCustomRoles);
+router.post('/roles', AdminController.createOrUpdateCustomRole);
+router.post('/roles/assign', AdminController.assignUserRole);
+router.get('/users/:userId/permissions', AdminController.getUserPermissionsAndOverrides);
+router.post('/users/:userId/override-permission', AdminController.setUserPermissionOverride);
+router.delete('/users/:userId/override-permission/:permissionKey', AdminController.removeUserPermissionOverride);
+
+// Dynamic Platform Limits
+router.get('/limits', AdminController.getPlatformLimits);
+router.put('/limits/:limitKey', AdminController.updatePlatformLimit);
+router.post('/roles/:roleId/limits', AdminController.setRoleLimit);
+router.post('/users/:userId/override-limit', AdminController.setUserLimitOverride);
+
+// Dynamic Subscription Plans
+router.get('/subscription-plans', AdminController.getDynamicSubscriptionPlans);
+router.post('/subscription-plans', AdminController.createOrUpdateSubscriptionPlan);
+
+// Dynamic Platform Settings & Audit Logs
+router.get('/settings', AdminController.getDynamicPlatformSettings);
+router.put('/settings/:key', AdminController.updateDynamicPlatformSetting);
+router.get('/audit-logs', AdminController.getAuditLogs);
+
+// Real-Time Dashboard Stats & System Health
+router.get('/dashboard-stats', AdminController.getRealTimeDashboardStats);
+router.get('/system-health', AdminController.getSystemHealthMetrics);
+
+// API Route Flags & Rate Limit Controls
+router.get('/api-routes', AdminController.getApiRouteFlags);
+router.put('/api-routes/update', AdminController.updateApiRouteFlag);
+
+// User Feature & API Overrides
+router.post('/users/:userId/override-feature', AdminController.setUserFeatureOverride);
+router.post('/users/:userId/override-api', AdminController.setUserApiOverride);
+
 export default router;
+
 

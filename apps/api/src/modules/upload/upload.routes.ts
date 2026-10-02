@@ -10,4 +10,10 @@ router.post('/single', uploadMiddleware.single('file'), UploadController.uploadS
 // Endpoint for multiple files upload (key: 'files', max 10 files)
 router.post('/multiple', uploadMiddleware.array('files', 10), UploadController.uploadMultiple);
 
+// Endpoint for resumable chunk upload
+router.post('/chunk', uploadMiddleware.single('chunk'), UploadController.uploadChunk);
+
+// Super Admin toggle S3 storage engine
+router.post('/s3-toggle', UploadController.toggleS3);
+
 export default router;

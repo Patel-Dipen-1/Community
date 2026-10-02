@@ -20,6 +20,6 @@ export const baseApi = createApi({
       return headers;
     },
   }),
-  tagTypes: ['VerificationQueue', 'Sessions', 'Users', 'Deletions', 'UserProfile', 'Conversations', 'Messages', 'Products', 'Groups', 'Inquiries', 'Status', 'SubscriptionSettings', 'UserSubscription'],
+  tagTypes: ['VerificationQueue', 'Sessions', 'Users', 'Deletions', 'UserProfile', 'Conversations', 'Messages', 'Products', 'Groups', 'Inquiries', 'Status', 'SubscriptionSettings', 'UserSubscription', 'BroadcastList'],
   endpoints: () => ({}),
 });

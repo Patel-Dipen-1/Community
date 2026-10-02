@@ -10,6 +10,8 @@ export class UploadController {
       ? 'videos'
       : file.mimetype.startsWith('image/')
       ? 'images'
+      : file.mimetype.startsWith('audio/')
+      ? 'audios'
       : 'documents';
     // Match destination path after "uploads/"
     const relativePath =
@@ -65,6 +67,43 @@ export class UploadController {
         files: fileDetails,
         urls: fileDetails.map((f) => f.url),
       });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  // Handle Resumable Chunk Upload
+  static async uploadChunk(req: Request, res: Response) {
+    try {
+      const { uploadId, chunkIndex, totalChunks, fileName } = req.body;
+      const file = req.file;
+
+      if (!file || !uploadId || chunkIndex === undefined || !totalChunks || !fileName) {
+        return res.status(400).json({ error: 'uploadId, chunkIndex, totalChunks, fileName, and chunk file are required' });
+      }
+
+      const { StorageService } = await import('./storage.service');
+      const result = await StorageService.handleChunkUpload({
+        uploadId,
+        chunkIndex: Number(chunkIndex),
+        totalChunks: Number(totalChunks),
+        fileName,
+        buffer: file.buffer || require('fs').readFileSync(file.path),
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  // Super Admin Toggle S3 CDN Engine
+  static async toggleS3(req: Request, res: Response) {
+    try {
+      const { enabled, bucketName } = req.body;
+      const { StorageService } = await import('./storage.service');
+      const result = await StorageService.toggleS3Storage(Boolean(enabled), bucketName);
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
