@@ -18,6 +18,7 @@ router.post('/reject-verification', AdminController.reject);
 // Session Termination Guard
 router.get('/sessions', AdminController.getSessions);
 router.post('/terminate-session', AdminController.terminateSession);
+router.post('/terminate-all-sessions', AdminController.terminateAllSessions);
 
 // Account Deletion Request Queue & Approval
 router.get('/deletion-requests', AdminController.getDeletionRequests);

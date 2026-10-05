@@ -94,6 +94,15 @@ export class AdminController {
     }
   }
 
+  static async terminateAllSessions(req: Request, res: Response) {
+    try {
+      const result = await AdminService.terminateAllSessions();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
   static async getDeletionRequests(req: Request, res: Response) {
     try {
       const params = parsePaginationParams(req, 100);

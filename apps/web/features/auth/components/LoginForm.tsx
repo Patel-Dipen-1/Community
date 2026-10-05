@@ -24,6 +24,9 @@ export function LoginForm() {
       } else {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('auth_user', JSON.stringify(data.user));
+        if (data.sessionWarning) {
+          localStorage.setItem('session_warning', data.sessionWarning);
+        }
 
         if (data.user.email === 'dnpatel2002@gmail.com' || data.user.role === 'SUPER_ADMIN') {
           router.push('/admin');

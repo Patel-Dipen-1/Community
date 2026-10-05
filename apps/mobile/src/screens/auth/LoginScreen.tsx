@@ -23,10 +23,19 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
     }
 
     try {
-      const response = await login({ username: username.trim(), password }).unwrap();
+      const response = await login({ username: username.trim(), password: password.trim() }).unwrap();
       await authService.saveAuthSession(dispatch, response.token, response.user);
+      if (response.sessionWarning) {
+        Alert.alert('Session Limit Notice', response.sessionWarning);
+      }
     } catch (err: any) {
-      const errorMsg = err?.data?.error || err?.message || 'Login failed. Please check credentials.';
+      console.error('Mobile login error:', err);
+      const errorMsg =
+        err?.data?.error ||
+        err?.data?.message ||
+        (typeof err?.error === 'string' ? err.error : null) ||
+        err?.message ||
+        'Unable to connect to server or invalid credentials. Please check connection and try again.';
       Alert.alert('Login Error', errorMsg);
     }
   };
@@ -45,6 +54,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
           value={username}
           onChangeText={setUsername}
           autoCapitalize="none"
+          autoCorrect={false}
         />
 
         <Input

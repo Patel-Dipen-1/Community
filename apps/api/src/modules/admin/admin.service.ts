@@ -370,20 +370,12 @@ export class AdminService {
     return { userId: updatedUser.id, status: 'REJECTED' };
   }
 
-  // Fetch Active Device Sessions with database pagination
+  // Fetch Active Device Sessions with database pagination (SUPER ADMIN EXCLUDED & PROTECTED)
   static async getActiveSessions(params: PaginationParams) {
     const { page, limit, skip, search, startDate, endDate, sortKey, sortOrder } = params;
 
     const where: any = {
       status: 'ACTIVE',
-      user: {
-        email: { not: 'dnpatel2002@gmail.com' },
-        NOT: {
-          business: {
-            assignedRole: 'SUPER_ADMIN',
-          },
-        },
-      },
     };
 
     if (search && search.length > 0) {
@@ -410,7 +402,7 @@ export class AdminService {
       orderBy = { [sortKey]: sortOrder };
     }
 
-    const [total, sessions] = await Promise.all([
+    const [totalRaw, allSessions] = await Promise.all([
       prisma.session.count({ where }),
       prisma.session.findMany({
         where,
@@ -425,24 +417,37 @@ export class AdminService {
       }),
     ]);
 
-    const formattedSessions = sessions.map((s) => ({
+    // Safely exclude Super Admin sessions in JS (SUPER ADMIN EXCLUDED & PROTECTED)
+    const nonAdminSessions = allSessions.filter((s) => {
+      const isSuperAdminEmail = s.user?.email === 'dnpatel2002@gmail.com';
+      const isSuperAdminRole = s.user?.business?.assignedRole === 'SUPER_ADMIN';
+      return !isSuperAdminEmail && !isSuperAdminRole;
+    });
+
+    const formattedSessions = nonAdminSessions.map((s) => ({
       id: s.id,
-      shopName: s.user.business?.shopName || 'Independent',
-      ownerName: s.user.fullName,
-      email: s.user.email,
-      community: (s.user.business?.allowedCommunities || ['clothing'])[0] || 'clothing',
+      userId: s.userId,
+      shopName: s.user?.business?.shopName || 'Independent User',
+      ownerName: s.user?.fullName || 'User',
+      email: s.user?.email || 'N/A',
+      mobileNumber: s.user?.mobileNumber || 'N/A',
+      community: (s.user?.business?.allowedCommunities || ['clothing'])[0] || 'clothing',
       platform: s.platform || 'WEB',
+      deviceId: s.deviceId || 'Browser Session',
       ipAddress: s.ipAddress || '127.0.0.1',
       lastActive: s.lastActive,
+      createdAt: s.createdAt,
       status: s.status,
     }));
 
-    const pagination = buildPaginationMeta(total, page, limit);
+    const pagination = buildPaginationMeta(nonAdminSessions.length, page, limit);
 
     return {
       sessions: formattedSessions,
       data: formattedSessions,
-      totalActive: total,
+      totalActive: nonAdminSessions.length,
+      webSessionsCount: formattedSessions.filter((s) => s.platform === 'WEB').length,
+      mobileSessionsCount: formattedSessions.filter((s) => s.platform !== 'WEB').length,
       pagination,
     };
   }
@@ -464,6 +469,26 @@ export class AdminService {
     });
 
     return { sessionId, status: 'REVOKED' };
+  }
+
+  // Bulk Terminate All Active User Sessions (Super Admin Protected)
+  static async terminateAllSessions() {
+    const result = await prisma.session.updateMany({
+      where: {
+        status: 'ACTIVE',
+        user: {
+          email: { not: 'dnpatel2002@gmail.com' },
+          NOT: {
+            business: {
+              assignedRole: 'SUPER_ADMIN',
+            },
+          },
+        },
+      },
+      data: { status: 'REVOKED' },
+    });
+
+    return { message: `Successfully terminated ${result.count} active non-admin device sessions.`, count: result.count };
   }
 
   // Fetch Account Deletion Requests with database pagination

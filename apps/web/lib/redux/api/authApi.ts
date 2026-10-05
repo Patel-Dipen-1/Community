@@ -12,7 +12,7 @@ const AUTH_ENDPOINTS = {
 
 export const authApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
-    login: builder.mutation<{ token: string; user: any; error?: string }, { username: string; password: string }>({
+    login: builder.mutation<{ token: string; user: any; error?: string; sessionWarning?: string | null }, { username: string; password: string }>({
       query: (credentials) => ({
         url: AUTH_ENDPOINTS.LOGIN,
         method: 'POST',

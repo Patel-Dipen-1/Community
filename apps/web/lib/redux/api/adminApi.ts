@@ -106,6 +106,14 @@ export const adminApi = baseApi.injectEndpoints({
       invalidatesTags: ['Sessions'],
     }),
 
+    terminateAllSessions: builder.mutation<{ message?: string; count?: number; error?: string }, void>({
+      query: () => ({
+        url: '/admin/terminate-all-sessions',
+        method: 'POST',
+      }),
+      invalidatesTags: ['Sessions'],
+    }),
+
     deleteAccount: builder.mutation<{ message?: string; error?: string }, string>({
       query: (userId) => ({
         url: ADMIN_ENDPOINTS.DELETE_ACCOUNT(userId),
@@ -365,6 +373,7 @@ export const {
   useApproveVerificationMutation,
   useRejectVerificationMutation,
   useTerminateSessionMutation,
+  useTerminateAllSessionsMutation,
   useDeleteAccountMutation,
   useCreateUserMutation,
   useUpdateUserMutation,

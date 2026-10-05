@@ -47,23 +47,19 @@ export class UserController {
       res.json({
         message: 'Login successful',
         token: result.token,
+        sessionWarning: result.sessionWarning || null,
         user: {
           id: result.user.id,
           fullName: result.user.fullName,
           email: result.user.email,
           mobileNumber: result.user.mobileNumber,
+          status: result.user.status,
           isVerified: result.user.isVerified,
           allowedCommunities: result.allowedCommunities,
           role: result.user.business?.assignedRole || (result.user.email === 'dnpatel2002@gmail.com' ? 'SUPER_ADMIN' : 'RETAILER'),
         },
       });
     } catch (error: any) {
-      if (error.message === 'MAX_SESSIONS_EXCEEDED') {
-        return res.status(403).json({
-          error: 'Maximum active sessions reached (5/5). Please logout another device/session or terminate an existing active session.',
-          canTerminateSession: true,
-        });
-      }
       const message = Array.isArray(error.errors)
         ? error.errors.map((e: any) => `${e.path.join('.') ? e.path.join('.') + ': ' : ''}${e.message}`).join(', ')
         : error.message || 'Login failed';

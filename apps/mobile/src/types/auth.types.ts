@@ -51,6 +51,7 @@ export interface LoginResponse {
   token: string;
   user: UserProfile;
   message?: string;
+  sessionWarning?: string | null;
 }
 
 export type { RegisterBusinessInput, LoginInput };

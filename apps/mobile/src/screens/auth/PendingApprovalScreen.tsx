@@ -1,19 +1,37 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../types/navigation.types';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { authService } from '../../services/auth/authService';
+import { useLazyGetProfileQuery } from '../../services/api/authApi';
 
-type Props = NativeStackScreenProps<AuthStackParamList, 'PendingApproval'>;
+type Props = NativeStackScreenProps<any, 'PendingApproval'>;
 
 export const PendingApprovalScreen: React.FC<Props> = () => {
   const dispatch = useAppDispatch();
-  const { user } = useAppSelector((state) => state.auth);
+  const { user, token } = useAppSelector((state) => state.auth);
+  const [triggerGetProfile, { isLoading: isRefreshing }] = useLazyGetProfileQuery();
 
   const isBlocked = user?.status === 'BLOCKED' || (user?.status as string) === 'BLACK';
+
+  const handleRefreshStatus = async () => {
+    try {
+      const res = await triggerGetProfile().unwrap();
+      if (res?.user && token) {
+        await authService.saveAuthSession(dispatch, token, res.user);
+        if (res.user.status === 'APPROVED' || res.user.isVerified) {
+          Alert.alert('Approved!', 'Your account status has been approved by Admin.');
+        } else {
+          Alert.alert('Status Check', `Current Status: ${res.user.status}`);
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Refresh Failed', err?.data?.error || err?.message || 'Failed to check status');
+    }
+  };
 
   const handleSignOut = () => {
     authService.logoutUser(dispatch);
@@ -39,6 +57,16 @@ export const PendingApprovalScreen: React.FC<Props> = () => {
             {user?.status || 'PENDING'}
           </Text>
         </View>
+
+        <Button
+          title={isRefreshing ? "Checking Status..." : "Check Approval Status 🔄"}
+          variant="primary"
+          onPress={handleRefreshStatus}
+          disabled={isRefreshing}
+          style={styles.btn}
+        />
+
+        <View style={{ height: 12 }} />
 
         <Button title="Sign Out ➔" variant="secondary" onPress={handleSignOut} style={styles.btn} />
       </Card>

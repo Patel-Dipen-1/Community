@@ -39,7 +39,7 @@ export function UserProfileModule() {
     activeIndex: number;
   } | null>(null);
 
-  // Check Local Authentication State
+  // Check Local Authentication State & Session Warning
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
     if (token) {
@@ -47,7 +47,13 @@ export function UserProfileModule() {
     } else {
       setIsAuthenticated(false);
     }
-  }, []);
+
+    const warning = localStorage.getItem('session_warning');
+    if (warning) {
+      addToast(`⚠️ ${warning}`, 'warning');
+      localStorage.removeItem('session_warning');
+    }
+  }, [addToast]);
 
   // Fetch Authenticated User's Profile
   const { data, isLoading, isError, refetch } = useGetProfileQuery(undefined, {

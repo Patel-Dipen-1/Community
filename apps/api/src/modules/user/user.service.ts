@@ -196,11 +196,16 @@ export class UserService {
   }
 
   static async loginUser(username: string, password: string, userAgent?: string, ip?: string) {
+    const cleanUsername = username ? username.trim() : '';
+    const cleanPassword = password ? password.trim() : '';
+    const rawDigits = cleanUsername.replace(/\D/g, '');
+
     const user = await prisma.user.findFirst({
       where: {
         OR: [
-          { email: username },
-          { mobileNumber: username },
+          { email: { equals: cleanUsername, mode: 'insensitive' } },
+          { mobileNumber: cleanUsername },
+          ...(rawDigits.length >= 10 ? [{ mobileNumber: rawDigits }] : []),
         ],
       },
       include: {
@@ -215,16 +220,28 @@ export class UserService {
     }
 
     if (!user.passwordHash) throw new Error('Invalid credentials');
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    const isMatch = (await bcrypt.compare(cleanPassword, user.passwordHash)) || (await bcrypt.compare(password, user.passwordHash));
     if (!isMatch) throw new Error('Invalid credentials');
 
-    // 5-Session Limit Enforcement
-    const activeSessionsCount = await prisma.session.count({
+    // 5-Session Limit Enforcement: Auto-evict oldest active session if 5 sessions reached
+    const activeSessions = await prisma.session.findMany({
       where: { userId: user.id, status: 'ACTIVE' },
+      orderBy: { createdAt: 'asc' },
     });
 
-    if (activeSessionsCount >= 5) {
-      throw new Error('MAX_SESSIONS_EXCEEDED');
+    let sessionWarning: string | null = null;
+
+    if (activeSessions.length >= 5) {
+      const numToRevoke = activeSessions.length - 4; // leave 4 active so new 1 makes 5 total
+      const oldestToRevoke = activeSessions.slice(0, numToRevoke);
+      const revokeIds = oldestToRevoke.map((s) => s.id);
+
+      await prisma.session.updateMany({
+        where: { id: { in: revokeIds } },
+        data: { status: 'REVOKED' },
+      });
+
+      sessionWarning = 'Maximum active sessions limit (5/5) reached. Your oldest device session was automatically logged out.';
     }
 
     const allowedCommunities = user.business?.allowedCommunities || ['clothing'];
@@ -257,7 +274,7 @@ export class UserService {
       data: { token },
     });
 
-    return { user, token, allowedCommunities };
+    return { user, token, allowedCommunities, sessionWarning };
   }
 
   static async requestAccountDeletion(userId: string, reason: string) {
