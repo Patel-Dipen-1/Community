@@ -6,6 +6,7 @@ interface HeaderProps {
   subtitle?: string;
   showBack?: boolean;
   onBack?: () => void;
+  onTitlePress?: () => void;
   rightElement?: React.ReactNode;
 }
 
@@ -14,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   subtitle,
   showBack = false,
   onBack,
+  onTitlePress,
   rightElement,
 }) => {
   return (
@@ -25,7 +27,12 @@ export const Header: React.FC<HeaderProps> = ({
               <Text style={styles.backIcon}>←</Text>
             </TouchableOpacity>
           )}
-          <View style={styles.titleContainer}>
+          <TouchableOpacity
+            style={styles.titleContainer}
+            onPress={onTitlePress}
+            disabled={!onTitlePress}
+            activeOpacity={onTitlePress ? 0.7 : 1}
+          >
             <Text style={styles.title} numberOfLines={1}>
               {title}
             </Text>
@@ -34,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {subtitle}
               </Text>
             )}
-          </View>
+          </TouchableOpacity>
         </View>
         {rightElement && <View style={styles.rightContainer}>{rightElement}</View>}
       </View>

@@ -11,13 +11,15 @@ import {
   Image,
   Modal,
   Alert,
+  ScrollView,
+  Linking,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import { RootStackParamList } from '../types/navigation.types';
 import { Header } from '../components/common/Header';
 import { useGetMessagesQuery, useSendMessageMutation, useToggleReactionMutation } from '../store/api/chatApi';
-import { useGetMyStoreQuery } from '../store/api/storeApi';
+import { useGetMyStoreQuery, useGetStoreByIdQuery } from '../store/api/storeApi';
 import { socketService } from '../services/socket/socketService';
 import { useAppSelector } from '../hooks/useRedux';
 
@@ -33,6 +35,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [messageText, setMessageText] = useState('');
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [quickCatalogVisible, setQuickCatalogVisible] = useState(false);
+  const [participantModalVisible, setParticipantModalVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   const { data: messagesData, refetch } = useGetMessagesQuery(
@@ -41,6 +44,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   );
 
   const { data: myStoreData } = useGetMyStoreQuery();
+  const { data: participantData, isLoading: loadingParticipant } = useGetStoreByIdQuery(recipientId, {
+    skip: !recipientId,
+  });
+
   const [sendMessage, { isLoading: isSending }] = useSendMessageMutation();
   const [toggleReaction] = useToggleReactionMutation();
 
@@ -130,22 +137,45 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     handleSendText(`📦 Shared Product Catalog Item: ${title}`, productCode);
   };
 
+  const handleCallParticipant = (phone?: string) => {
+    if (!phone) {
+      Alert.alert('Call Unavailable', 'No mobile number associated with this partner.');
+      return;
+    }
+    Linking.openURL(`tel:${phone}`).catch(() => {
+      Alert.alert('Error', 'Unable to launch phone dialer.');
+    });
+  };
+
   const myProducts = myStoreData?.store?.products || [];
+  const participantStore = (participantData as any)?.store;
+  const participantBusiness = (participantData as any)?.business;
+  const participantProducts = (participantData as any)?.products || participantStore?.products || [];
 
   return (
     <View style={styles.container}>
       <Header
-        title={recipientName || 'Direct Chat'}
-        subtitle="Online • End-to-End Encryption"
+        title={recipientName || participantBusiness?.shopName || 'Direct Chat'}
+        subtitle="Tap for Profile & Catalog • Online"
         showBack
         onBack={() => navigation.goBack()}
+        onTitlePress={() => setParticipantModalVisible(true)}
         rightElement={
-          <TouchableOpacity
-            style={styles.catalogBtn}
-            onPress={() => setQuickCatalogVisible(true)}
-          >
-            <Text style={styles.catalogBtnText}>$ Catalog</Text>
-          </TouchableOpacity>
+          <View style={styles.headerRightRow}>
+            <TouchableOpacity
+              style={styles.profileHeaderBtn}
+              onPress={() => setParticipantModalVisible(true)}
+            >
+              <Text style={styles.profileHeaderBtnText}>👤 Profile</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.catalogBtn}
+              onPress={() => setQuickCatalogVisible(true)}
+            >
+              <Text style={styles.catalogBtnText}>$ Catalog</Text>
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -227,6 +257,183 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
       </KeyboardAvoidingView>
 
+      {/* Opposite Person / Business Profile Modal */}
+      <Modal visible={participantModalVisible} animationType="slide" transparent>
+        <View style={styles.fullModalBg}>
+          <View style={styles.participantModalContainer}>
+            {/* Modal Header Bar */}
+            <View style={styles.partModalHeader}>
+              <Text style={styles.partModalTitle}>Business Profile & Catalog</Text>
+              <TouchableOpacity
+                style={styles.partCloseBtn}
+                onPress={() => setParticipantModalVisible(false)}
+              >
+                <Text style={styles.partCloseText}>✕ Close</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.partModalScroll} showsVerticalScrollIndicator={false}>
+              {loadingParticipant ? (
+                <View style={styles.loadingBox}>
+                  <Text style={styles.loadingText}>Loading Partner Details...</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Banner / Header Card */}
+                  <View style={styles.profileHeroCard}>
+                    {participantStore?.bannerUrl ? (
+                      <Image source={{ uri: participantStore.bannerUrl }} style={styles.bannerImg} />
+                    ) : (
+                      <View style={styles.bannerPlaceholder} />
+                    )}
+
+                    <View style={styles.avatarRow}>
+                      <View style={styles.avatarCircle}>
+                        {participantStore?.logoUrl ? (
+                          <Image source={{ uri: participantStore.logoUrl }} style={styles.avatarImg} />
+                        ) : (
+                          <Text style={styles.avatarInitials}>
+                            {(participantBusiness?.shopName || recipientName || 'P').charAt(0).toUpperCase()}
+                          </Text>
+                        )}
+                      </View>
+
+                      <View style={styles.heroTextCol}>
+                        <View style={styles.titleRow}>
+                          <Text style={styles.shopTitleText}>
+                            {participantBusiness?.shopName || recipientName || 'Business Partner'}
+                          </Text>
+                          {participantBusiness?.verificationTag && (
+                            <View style={styles.verifiedBadge}>
+                              <Text style={styles.verifiedBadgeText}>✓ Verified</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.ownerSubText}>
+                          Owner: {participantBusiness?.ownerName || 'Verified Member'}
+                        </Text>
+
+                        {participantBusiness?.assignedRole && (
+                          <View style={styles.roleTag}>
+                            <Text style={styles.roleTagText}>{participantBusiness.assignedRole}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Quick Call Action CTA Bar */}
+                  <TouchableOpacity
+                    style={styles.callCtaBtn}
+                    onPress={() => handleCallParticipant(participantBusiness?.mobileNumber)}
+                  >
+                    <Text style={styles.callCtaIcon}>📞</Text>
+                    <Text style={styles.callCtaText}>
+                      Call Owner: {participantBusiness?.mobileNumber || 'Contact Number'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Business & Trade Details Card */}
+                  <View style={styles.infoSectionCard}>
+                    <Text style={styles.infoSectionTitle}>📋 Verification & Business Details</Text>
+                    
+                    <View style={styles.infoGridRow}>
+                      <Text style={styles.infoLabel}>GST Number:</Text>
+                      <Text style={styles.infoValue}>{participantBusiness?.gstNumber || 'GST Verified'}</Text>
+                    </View>
+
+                    <View style={styles.infoGridRow}>
+                      <Text style={styles.infoLabel}>Location:</Text>
+                      <Text style={styles.infoValue}>
+                        {[
+                          participantBusiness?.streetAddress,
+                          participantBusiness?.city,
+                          participantBusiness?.state,
+                          participantBusiness?.pincode,
+                        ]
+                          .filter(Boolean)
+                          .join(', ') || 'Registered Trade Hub'}
+                      </Text>
+                    </View>
+
+                    {participantBusiness?.allowedCommunities && (
+                      <View style={styles.infoGridRow}>
+                        <Text style={styles.infoLabel}>Trade Communities:</Text>
+                        <View style={styles.commsRow}>
+                          {participantBusiness.allowedCommunities.map((c: string, idx: number) => (
+                            <View key={idx} style={styles.commPill}>
+                              <Text style={styles.commPillText}>{c.toUpperCase()}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                    {participantStore?.bio && (
+                      <View style={styles.bioContainer}>
+                        <Text style={styles.bioLabel}>About Business:</Text>
+                        <Text style={styles.bioText}>{participantStore.bio}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Partner Catalog Showcase Section */}
+                  <View style={styles.catalogSection}>
+                    <Text style={styles.catalogSectionTitle}>
+                      📦 Product Catalog ({participantProducts.length} items)
+                    </Text>
+
+                    {participantProducts.length === 0 ? (
+                      <View style={styles.emptyCatBox}>
+                        <Text style={styles.emptyCatText}>No active catalog items uploaded yet.</Text>
+                      </View>
+                    ) : (
+                      participantProducts.map((prod: any) => (
+                        <View key={prod.id} style={styles.partCatalogCard}>
+                          <View style={styles.partCatTopRow}>
+                            {prod.images && prod.images[0] ? (
+                              <Image source={{ uri: prod.images[0] }} style={styles.prodThumb} />
+                            ) : (
+                              <View style={styles.prodThumbPlaceholder}>
+                                <Text style={styles.prodThumbIcon}>📦</Text>
+                              </View>
+                            )}
+
+                            <View style={styles.prodDetailsCol}>
+                              <Text style={styles.prodTitle}>{prod.title}</Text>
+                              <Text style={styles.prodCode}>SKU: {prod.code}</Text>
+                              
+                              <View style={styles.prodPriceRow}>
+                                <Text style={styles.prodPrice}>
+                                  ₹{prod.priceTiers?.[0]?.price || prod.startingPrice || 'On Request'}
+                                </Text>
+                                {prod.moq && (
+                                  <Text style={styles.prodMoq}>MOQ: {prod.moq} pcs</Text>
+                                )}
+                              </View>
+                            </View>
+                          </View>
+
+                          <TouchableOpacity
+                            style={styles.shareInChatBtn}
+                            onPress={() => {
+                              setParticipantModalVisible(false);
+                              handleSendText(`📦 Inquiry for SKU (${prod.code}): ${prod.title}`, prod.code);
+                            }}
+                          >
+                            <Text style={styles.shareInChatText}>💬 Inquire / Share SKU in Chat</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Quick $ SKU Catalog Selector Modal */}
       <Modal visible={quickCatalogVisible} animationType="slide" transparent>
         <View style={styles.modalBg}>
@@ -267,6 +474,16 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617' },
   flexOne: { flex: 1 },
+  headerRightRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  profileHeaderBtn: {
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#38bdf8',
+  },
+  profileHeaderBtnText: { color: '#38bdf8', fontSize: 11, fontWeight: '800' },
   catalogBtn: {
     backgroundColor: '#4f46e5',
     paddingHorizontal: 10,
@@ -344,4 +561,135 @@ const styles = StyleSheet.create({
   catItemSku: { color: '#38bdf8', fontSize: 11, marginTop: 2 },
   closeModalBtn: { marginTop: 14, paddingVertical: 10, alignItems: 'center' },
   closeModalText: { color: '#e11d48', fontSize: 14, fontWeight: '800' },
+
+  /* Participant Full Profile Modal Styles */
+  fullModalBg: {
+    flex: 1,
+    backgroundColor: 'rgba(2, 6, 23, 0.95)',
+    justifyContent: 'flex-end',
+  },
+  participantModalContainer: {
+    backgroundColor: '#0f172a',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '92%',
+    minHeight: '70%',
+    paddingBottom: 24,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  partModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
+  partModalTitle: { color: '#38bdf8', fontSize: 16, fontWeight: '900' },
+  partCloseBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#1e293b', borderRadius: 12 },
+  partCloseText: { color: '#f8fafc', fontSize: 12, fontWeight: '800' },
+  partModalScroll: { paddingHorizontal: 16 },
+  loadingBox: { padding: 40, alignItems: 'center' },
+  loadingText: { color: '#94a3b8', fontSize: 14 },
+  profileHeroCard: {
+    backgroundColor: '#020617',
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  bannerImg: { width: '100%', height: 90 },
+  bannerPlaceholder: { width: '100%', height: 90, backgroundColor: '#1e293b' },
+  avatarRow: { flexDirection: 'row', padding: 14, marginTop: -30, alignItems: 'flex-end' },
+  avatarCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#4f46e5',
+    borderWidth: 3,
+    borderColor: '#020617',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImg: { width: '100%', height: '100%' },
+  avatarInitials: { color: '#ffffff', fontSize: 26, fontWeight: '900' },
+  heroTextCol: { marginLeft: 12, flex: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  shopTitleText: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  verifiedBadge: { backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  verifiedBadgeText: { color: '#10b981', fontSize: 10, fontWeight: '800' },
+  ownerSubText: { color: '#94a3b8', fontSize: 12, marginTop: 2 },
+  roleTag: { backgroundColor: '#312e81', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, marginTop: 6, alignSelf: 'flex-start' },
+  roleTagText: { color: '#a5b4fc', fontSize: 10, fontWeight: '900' },
+  callCtaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#16a34a',
+    paddingVertical: 12,
+    borderRadius: 14,
+    marginTop: 14,
+    gap: 8,
+  },
+  callCtaIcon: { fontSize: 18 },
+  callCtaText: { color: '#ffffff', fontSize: 14, fontWeight: '900' },
+  infoSectionCard: {
+    backgroundColor: '#020617',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  infoSectionTitle: { color: '#38bdf8', fontSize: 14, fontWeight: '900', marginBottom: 12 },
+  infoGridRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  infoLabel: { color: '#64748b', fontSize: 12, fontWeight: '700' },
+  infoValue: { color: '#f8fafc', fontSize: 12, fontWeight: '800', flex: 1, textAlign: 'right' },
+  commsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end', flex: 1 },
+  commPill: { backgroundColor: '#1e293b', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  commPillText: { color: '#38bdf8', fontSize: 10, fontWeight: '800' },
+  bioContainer: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#1e293b' },
+  bioLabel: { color: '#64748b', fontSize: 12, fontWeight: '700', marginBottom: 2 },
+  bioText: { color: '#cbd5e1', fontSize: 12, lineHeight: 18 },
+  catalogSection: { marginTop: 18, marginBottom: 20 },
+  catalogSectionTitle: { color: '#818cf8', fontSize: 15, fontWeight: '900', marginBottom: 12 },
+  emptyCatBox: { padding: 20, backgroundColor: '#020617', borderRadius: 14, alignItems: 'center' },
+  emptyCatText: { color: '#64748b', fontSize: 12 },
+  partCatalogCard: {
+    backgroundColor: '#020617',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  partCatTopRow: { flexDirection: 'row', alignItems: 'center' },
+  prodThumb: { width: 60, height: 60, borderRadius: 10 },
+  prodThumbPlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 10,
+    backgroundColor: '#1e293b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prodThumbIcon: { fontSize: 24 },
+  prodDetailsCol: { marginLeft: 12, flex: 1 },
+  prodTitle: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  prodCode: { color: '#38bdf8', fontSize: 11, fontWeight: '800', marginTop: 2 },
+  prodPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  prodPrice: { color: '#4ade80', fontSize: 13, fontWeight: '900' },
+  prodMoq: { color: '#94a3b8', fontSize: 10 },
+  shareInChatBtn: {
+    marginTop: 10,
+    backgroundColor: '#312e81',
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  shareInChatText: { color: '#a5b4fc', fontSize: 12, fontWeight: '900' },
 });
