@@ -36,6 +36,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [quickCatalogVisible, setQuickCatalogVisible] = useState(false);
   const [participantModalVisible, setParticipantModalVisible] = useState(false);
+  const [selectedProductModal, setSelectedProductModal] = useState<any | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
   const { data: messagesData, refetch } = useGetMessagesQuery(
@@ -144,6 +145,16 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }
     Linking.openURL(`tel:${phone}`).catch(() => {
       Alert.alert('Error', 'Unable to launch phone dialer.');
+    });
+  };
+
+  const handleOpenStore = () => {
+    setParticipantModalVisible(false);
+    setSelectedProductModal(null);
+    const bizId = participantBusiness?.id || recipientId;
+    navigation.navigate('Main', {
+      screen: 'Store',
+      params: { businessId: bizId },
     });
   };
 
@@ -264,12 +275,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             {/* Modal Header Bar */}
             <View style={styles.partModalHeader}>
               <Text style={styles.partModalTitle}>Business Profile & Catalog</Text>
-              <TouchableOpacity
-                style={styles.partCloseBtn}
-                onPress={() => setParticipantModalVisible(false)}
-              >
-                <Text style={styles.partCloseText}>✕ Close</Text>
-              </TouchableOpacity>
+              <View style={styles.partHeaderActions}>
+                <TouchableOpacity style={styles.openStoreHeaderBtn} onPress={handleOpenStore}>
+                  <Text style={styles.openStoreHeaderText}>🏪 Open Store</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.partCloseBtn}
+                  onPress={() => setParticipantModalVisible(false)}
+                >
+                  <Text style={styles.partCloseText}>✕ Close</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <ScrollView style={styles.partModalScroll} showsVerticalScrollIndicator={false}>
@@ -322,16 +338,26 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                     </View>
                   </View>
 
-                  {/* Quick Call Action CTA Bar */}
-                  <TouchableOpacity
-                    style={styles.callCtaBtn}
-                    onPress={() => handleCallParticipant(participantBusiness?.mobileNumber)}
-                  >
-                    <Text style={styles.callCtaIcon}>📞</Text>
-                    <Text style={styles.callCtaText}>
-                      Call Owner: {participantBusiness?.mobileNumber || 'Contact Number'}
-                    </Text>
-                  </TouchableOpacity>
+                  {/* Quick Action CTA Bar: Call & Open Store */}
+                  <View style={styles.ctaDoubleRow}>
+                    <TouchableOpacity
+                      style={styles.callCtaBtnFlex}
+                      onPress={() => handleCallParticipant(participantBusiness?.mobileNumber)}
+                    >
+                      <Text style={styles.callCtaIcon}>📞</Text>
+                      <Text style={styles.callCtaText}>
+                        Call: {participantBusiness?.mobileNumber || 'Contact'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.storeCtaBtnFlex}
+                      onPress={handleOpenStore}
+                    >
+                      <Text style={styles.callCtaIcon}>🏪</Text>
+                      <Text style={styles.callCtaText}>Open Showroom</Text>
+                    </TouchableOpacity>
+                  </View>
 
                   {/* Business & Trade Details Card */}
                   <View style={styles.infoSectionCard}>
@@ -379,9 +405,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
                   {/* Partner Catalog Showcase Section */}
                   <View style={styles.catalogSection}>
-                    <Text style={styles.catalogSectionTitle}>
-                      📦 Product Catalog ({participantProducts.length} items)
-                    </Text>
+                    <View style={styles.catalogSecTitleRow}>
+                      <Text style={styles.catalogSectionTitle}>
+                        📦 Product Catalog ({participantProducts.length} items)
+                      </Text>
+                      <TouchableOpacity onPress={handleOpenStore}>
+                        <Text style={styles.seeAllStoreLink}>View All in Store ➔</Text>
+                      </TouchableOpacity>
+                    </View>
 
                     {participantProducts.length === 0 ? (
                       <View style={styles.emptyCatBox}>
@@ -389,7 +420,12 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                       </View>
                     ) : (
                       participantProducts.map((prod: any) => (
-                        <View key={prod.id} style={styles.partCatalogCard}>
+                        <TouchableOpacity
+                          key={prod.id}
+                          style={styles.partCatalogCard}
+                          activeOpacity={0.8}
+                          onPress={() => setSelectedProductModal(prod)}
+                        >
                           <View style={styles.partCatTopRow}>
                             {prod.images && prod.images[0] ? (
                               <Image source={{ uri: prod.images[0] }} style={styles.prodThumb} />
@@ -414,16 +450,25 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                             </View>
                           </View>
 
-                          <TouchableOpacity
-                            style={styles.shareInChatBtn}
-                            onPress={() => {
-                              setParticipantModalVisible(false);
-                              handleSendText(`📦 Inquiry for SKU (${prod.code}): ${prod.title}`, prod.code);
-                            }}
-                          >
-                            <Text style={styles.shareInChatText}>💬 Inquire / Share SKU in Chat</Text>
-                          </TouchableOpacity>
-                        </View>
+                          <View style={styles.cardActionsRow}>
+                            <TouchableOpacity
+                              style={styles.viewDetailsBtn}
+                              onPress={() => setSelectedProductModal(prod)}
+                            >
+                              <Text style={styles.viewDetailsText}>👁️ View Specs</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.shareInChatBtnFlex}
+                              onPress={() => {
+                                setParticipantModalVisible(false);
+                                handleSendText(`📦 Inquiry for SKU (${prod.code}): ${prod.title}`, prod.code);
+                              }}
+                            >
+                              <Text style={styles.shareInChatText}>💬 Inquire SKU</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </TouchableOpacity>
                       ))
                     )}
                   </View>
@@ -433,6 +478,93 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Product Detail Modal */}
+      {selectedProductModal && (
+        <Modal visible animationType="slide" transparent>
+          <View style={styles.modalBg}>
+            <View style={styles.productDetailModalBox}>
+              <View style={styles.prodModalHeaderRow}>
+                <Text style={styles.prodModalHeaderTitle} numberOfLines={1}>
+                  {selectedProductModal.title}
+                </Text>
+                <TouchableOpacity onPress={() => setSelectedProductModal(null)}>
+                  <Text style={styles.closeBtnText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={{ maxHeight: 420 }}>
+                {selectedProductModal.images && selectedProductModal.images[0] ? (
+                  <Image source={{ uri: selectedProductModal.images[0] }} style={styles.detailModalImage} />
+                ) : (
+                  <View style={styles.detailModalPlaceholder}>
+                    <Text style={{ fontSize: 40 }}>📦</Text>
+                  </View>
+                )}
+
+                <View style={styles.modalMetaRow}>
+                  <Text style={styles.skuTagText}>SKU: {selectedProductModal.code}</Text>
+                  <Text style={styles.modalPriceText}>
+                    ₹{selectedProductModal.priceTiers?.[0]?.price || selectedProductModal.startingPrice || '100'} / unit
+                  </Text>
+                </View>
+
+                <Text style={styles.modalMoqText}>
+                  Minimum Order Quantity (MOQ): {selectedProductModal.moq || 10} units
+                </Text>
+
+                {/* Price Tiers if available */}
+                {selectedProductModal.priceTiers && selectedProductModal.priceTiers.length > 0 && (
+                  <View style={styles.priceTiersCard}>
+                    <Text style={styles.priceTiersHeader}>Bulk Tier Rates</Text>
+                    {selectedProductModal.priceTiers.map((tier: any, idx: number) => (
+                      <View key={idx} style={styles.tierLine}>
+                        <Text style={styles.tierQtyText}>Min Qty {tier.minQty}+ pcs</Text>
+                        <Text style={styles.tierPriceText}>₹{tier.price} / pc</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <Text style={styles.descLabel}>Product Specifications & Description:</Text>
+                <Text style={styles.modalDescText}>
+                  {selectedProductModal.description || 'Verified B2B wholesale trade product. High quality manufacturing.'}
+                </Text>
+              </ScrollView>
+
+              <View style={styles.modalActionButtonsCol}>
+                <TouchableOpacity
+                  style={styles.primaryShareBtn}
+                  onPress={() => {
+                    const code = selectedProductModal.code;
+                    const title = selectedProductModal.title;
+                    setSelectedProductModal(null);
+                    setParticipantModalVisible(false);
+                    handleSendText(`📦 Inquiry for SKU (${code}): ${title}`, code);
+                  }}
+                >
+                  <Text style={styles.primaryShareText}>💬 Share / Inquire SKU in Chat</Text>
+                </TouchableOpacity>
+
+                <View style={styles.modalDualActionsRow}>
+                  <TouchableOpacity style={styles.viewPageBtn} onPress={() => {
+                    const prodId = selectedProductModal.id;
+                    setSelectedProductModal(null);
+                    setParticipantModalVisible(false);
+                    navigation.navigate('ProductDetail', { productId: prodId });
+                  }}>
+                    <Text style={styles.viewPageText}>📄 Full Page</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.openStoreBtn} onPress={handleOpenStore}>
+                    <Text style={styles.openStoreText}>🏪 Open Vendor Store</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* Quick $ SKU Catalog Selector Modal */}
       <Modal visible={quickCatalogVisible} animationType="slide" transparent>
@@ -692,4 +824,136 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   shareInChatText: { color: '#a5b4fc', fontSize: 12, fontWeight: '900' },
+
+  partHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  openStoreHeaderBtn: {
+    backgroundColor: '#312e81',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#6366f1',
+  },
+  openStoreHeaderText: { color: '#a5b4fc', fontSize: 11, fontWeight: '900' },
+
+  ctaDoubleRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  callCtaBtnFlex: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#16a34a',
+    paddingVertical: 12,
+    borderRadius: 14,
+    gap: 6,
+  },
+  storeCtaBtnFlex: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4f46e5',
+    paddingVertical: 12,
+    borderRadius: 14,
+    gap: 6,
+  },
+  catalogSecTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  seeAllStoreLink: { color: '#38bdf8', fontSize: 12, fontWeight: '800' },
+  cardActionsRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  viewDetailsBtn: {
+    flex: 1,
+    backgroundColor: '#1e293b',
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  viewDetailsText: { color: '#cbd5e1', fontSize: 11, fontWeight: '800' },
+  shareInChatBtnFlex: {
+    flex: 1,
+    backgroundColor: '#312e81',
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+
+  /* Product Details Modal Styles */
+  productDetailModalBox: {
+    backgroundColor: '#0f172a',
+    borderRadius: 20,
+    padding: 20,
+    width: '90%',
+    maxHeight: '85%',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  prodModalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  prodModalHeaderTitle: { color: '#ffffff', fontSize: 17, fontWeight: '900', flex: 1 },
+  closeBtnText: { color: '#94a3b8', fontSize: 18, fontWeight: '900', paddingHorizontal: 8 },
+  detailModalImage: { width: '100%', height: 180, borderRadius: 14, marginBottom: 12 },
+  detailModalPlaceholder: {
+    width: '100%',
+    height: 140,
+    borderRadius: 14,
+    backgroundColor: '#1e293b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  modalMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  skuTagText: { color: '#38bdf8', fontSize: 12, fontWeight: '900' },
+  modalPriceText: { color: '#4ade80', fontSize: 18, fontWeight: '900' },
+  modalMoqText: { color: '#cbd5e1', fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  priceTiersCard: {
+    backgroundColor: '#020617',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  priceTiersHeader: { color: '#818cf8', fontSize: 11, fontWeight: '800', marginBottom: 6 },
+  tierLine: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 },
+  tierQtyText: { color: '#94a3b8', fontSize: 11 },
+  tierPriceText: { color: '#4ade80', fontSize: 11, fontWeight: '800' },
+  descLabel: { color: '#64748b', fontSize: 11, fontWeight: '700', marginBottom: 2 },
+  modalDescText: { color: '#cbd5e1', fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  modalActionButtonsCol: { gap: 8, marginTop: 10 },
+  primaryShareBtn: {
+    backgroundColor: '#4f46e5',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  primaryShareText: { color: '#ffffff', fontSize: 13, fontWeight: '900' },
+  modalDualActionsRow: { flexDirection: 'row', gap: 8 },
+  viewPageBtn: {
+    flex: 1,
+    backgroundColor: '#1e293b',
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  viewPageText: { color: '#cbd5e1', fontSize: 12, fontWeight: '800' },
+  openStoreBtn: {
+    flex: 1,
+    backgroundColor: '#312e81',
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  openStoreText: { color: '#a5b4fc', fontSize: 12, fontWeight: '800' },
 });

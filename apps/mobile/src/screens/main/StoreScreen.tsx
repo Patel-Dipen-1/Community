@@ -20,7 +20,7 @@ import { Header } from '../../components/common/Header';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { EmptyState } from '../../components/common/EmptyState';
-import { useGetMyStoreQuery, useUpdateStoreMutation } from '../../store/api/storeApi';
+import { useGetMyStoreQuery, useGetStoreByIdQuery, useUpdateStoreMutation } from '../../store/api/storeApi';
 import { useCreateProductMutation, useDeleteProductMutation } from '../../store/api/productApi';
 import { ENV_CONFIG } from '../../constants/config';
 import { authStorage } from '../../services/storage/authStorage';
@@ -63,11 +63,25 @@ const uploadLocalImage = async (localUri: string): Promise<string> => {
   }
 };
 
-export const StoreScreen: React.FC<Props> = ({ navigation }) => {
+export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
   const { user } = useAppSelector((state) => state.auth);
+  const targetBusinessId = route?.params?.businessId;
 
-  // Store data queries & mutations
-  const { data: storeData, isLoading, refetch } = useGetMyStoreQuery();
+  // Dual mode query: My store vs Target Supplier Store
+  const { data: myStoreData, isLoading: loadingMyStore, refetch: refetchMyStore } = useGetMyStoreQuery(
+    undefined,
+    { skip: Boolean(targetBusinessId) }
+  );
+  const { data: publicStoreData, isLoading: loadingPublicStore, refetch: refetchPublicStore } = useGetStoreByIdQuery(
+    targetBusinessId || '',
+    { skip: !targetBusinessId }
+  );
+
+  const isViewingOtherStore = Boolean(targetBusinessId && targetBusinessId !== user?.business?.id);
+  const storeData = isViewingOtherStore ? publicStoreData : myStoreData;
+  const isLoading = isViewingOtherStore ? loadingPublicStore : loadingMyStore;
+  const refetch = isViewingOtherStore ? refetchPublicStore : refetchMyStore;
+
   const [updateStore, { isLoading: isUpdatingStore }] = useUpdateStoreMutation();
   const [createProduct, { isLoading: isCreatingProduct }] = useCreateProductMutation();
   const [deleteProduct] = useDeleteProductMutation();
@@ -97,9 +111,9 @@ export const StoreScreen: React.FC<Props> = ({ navigation }) => {
   // Selected Product Detail Modal
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
 
-  const store = storeData?.store;
-  const biz = store?.business || user?.business;
-  const products = store?.products || [];
+  const store = (storeData as any)?.store;
+  const biz = (storeData as any)?.business || store?.business || user?.business;
+  const products: any[] = (storeData as any)?.products || store?.products || [];
 
   // Extract unique categories
   const categories = ['ALL', ...Array.from(new Set(products.map((p) => p.specs?.Category || 'General')))];
@@ -294,15 +308,34 @@ export const StoreScreen: React.FC<Props> = ({ navigation }) => {
           </View>
 
           {/* Action CTAs Row */}
-          <View style={styles.heroActionsRow}>
-            <TouchableOpacity style={styles.editStoreBtn} onPress={handleOpenEditStore}>
-              <Text style={styles.editStoreBtnText}>✏️ Edit Store</Text>
-            </TouchableOpacity>
+          {!isViewingOtherStore ? (
+            <View style={styles.heroActionsRow}>
+              <TouchableOpacity style={styles.editStoreBtn} onPress={handleOpenEditStore}>
+                <Text style={styles.editStoreBtnText}>✏️ Edit Store</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity style={styles.addProductBtn} onPress={() => setAddProductModalOpen(true)}>
-              <Text style={styles.addProductBtnText}>➕ Add Product</Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity style={styles.addProductBtn} onPress={() => setAddProductModalOpen(true)}>
+                <Text style={styles.addProductBtnText}>➕ Add Product</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.heroActionsRow}>
+              <TouchableOpacity
+                style={styles.chatVendorBtn}
+                onPress={() => {
+                  if (biz?.id) {
+                    navigation.navigate('ChatDetail', {
+                      conversationId: '',
+                      recipientId: biz.id,
+                      recipientName: biz.shopName || 'Vendor',
+                    });
+                  }
+                }}
+              >
+                <Text style={styles.chatVendorBtnText}>💬 Chat with Vendor</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Store Stats Bar */}
           <View style={styles.statsBar}>
@@ -661,6 +694,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addProductBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
+  chatVendorBtn: {
+    flex: 1,
+    height: 40,
+    backgroundColor: '#4f46e5',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatVendorBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
 
   statsBar: {
     flexDirection: 'row',
