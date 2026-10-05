@@ -3,6 +3,8 @@ import { Platform } from 'react-native';
 import { ENV_CONFIG } from '../../constants/config';
 import { authStorage } from '../storage/authStorage';
 
+import Constants from 'expo-constants';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -30,7 +32,8 @@ export class PushNotificationService {
         return null;
       }
 
-      const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null);
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId || (Constants.manifest as any)?.extra?.eas?.projectId;
+      const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined).catch(() => null);
       if (!tokenData) return null;
       const token = tokenData.data;
 

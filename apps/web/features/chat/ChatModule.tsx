@@ -57,7 +57,7 @@ export function ChatModule() {
   // Authenticated Profile
   const { data: profileData, isLoading: isProfileLoading } = useGetProfileQuery();
   const currentUser = profileData?.user;
-  const isApprovedUser = currentUser?.status === 'APPROVED' || currentUser?.isVerified;
+  const isApprovedUser = Boolean(currentUser) && currentUser?.status !== 'BLOCKED' && (currentUser?.status as string) !== 'BLACK';
 
   // Active Tab View in Left Panel (chats, broadcasts, contacts, communities)
   const [activeLeftTab, setActiveLeftTab] = useState<'chats' | 'broadcasts' | 'contacts' | 'communities'>(
@@ -533,18 +533,23 @@ export function ChatModule() {
     }
   };
 
-  // Filter messages for 24-hour auto-delete and local Clear Chat
+  // Filter messages for local Clear Chat
   const displayMessages = messages.filter((msg) => {
+    if (!msg) return false;
     const msgTime = new Date(msg.createdAt).getTime();
-    if (clearedAtTimestamp && msgTime <= clearedAtTimestamp) {
-      return false;
-    }
-    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
-    if (msgTime < twentyFourHoursAgo) {
+    if (clearedAtTimestamp && !isNaN(msgTime) && msgTime <= (clearedAtTimestamp - 60000)) {
       return false;
     }
     return true;
   });
+
+  // Auto-recover messages if stale clearedAtTimestamp hides all conversation history
+  useEffect(() => {
+    if (messages.length > 0 && displayMessages.length === 0 && clearedAtTimestamp && activeConversationId) {
+      localStorage.removeItem(`chat_clearedAt_${activeConversationId}`);
+      setClearedAtTimestamp(null);
+    }
+  }, [messages.length, displayMessages.length, clearedAtTimestamp, activeConversationId]);
 
   const handleSendMessageSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -821,17 +826,48 @@ export function ChatModule() {
 
                   const lastMsgTime = c.lastMessage?.createdAt || c.updatedAt;
                   const isCallMsg = c.lastMessage?.text?.startsWith('[CALL_LOG]:');
-                  const lastMsgPreview = isCallMsg
-                    ? c.lastMessage?.text?.includes('MISSED')
+                  const isSelfLastMsg = c.lastMessage?.senderId === currentUser?.id;
+                  const prefix = isSelfLastMsg ? 'You: ' : '';
+
+                  let lastMsgText = participant?.shopName || 'Click to open conversation';
+                  if (isCallMsg) {
+                    lastMsgText = c.lastMessage?.text?.includes('MISSED')
                       ? '📹 Missed Call'
-                      : '📞 Call Ended'
-                    : c.lastMessage?.mediaUrl
-                    ? '📎 Media Attachment'
-                    : c.lastMessage?.text
-                    ? c.lastMessage.text
-                    : c.lastMessage?.productCode
-                    ? `📦 SKU: ${c.lastMessage.productCode}`
-                    : participant?.shopName || 'Click to open conversation';
+                      : '📞 Call Ended';
+                  } else if (c.lastMessage?.mediaUrl) {
+                    const lower = c.lastMessage.mediaUrl.toLowerCase();
+                    if (lower.endsWith('.webm') || lower.endsWith('.mp3') || lower.endsWith('.m4a') || lower.endsWith('.ogg')) {
+                      lastMsgText = '🎙️ Voice note';
+                    } else if (lower.endsWith('.mp4') || lower.endsWith('.mov')) {
+                      lastMsgText = '📹 Video';
+                    } else if (lower.endsWith('.pdf') || lower.endsWith('.doc') || lower.endsWith('.docx') || lower.endsWith('.xls') || lower.endsWith('.zip')) {
+                      lastMsgText = '📄 Document';
+                    } else {
+                      lastMsgText = '📷 Photo';
+                    }
+                  } else if (c.lastMessage?.text) {
+                    lastMsgText = c.lastMessage.text;
+                  } else if (c.lastMessage?.productCode) {
+                    lastMsgText = `📦 SKU: ${c.lastMessage.productCode}`;
+                  }
+
+                  const lastMsgPreview = c.lastMessage ? `${prefix}${lastMsgText}` : lastMsgText;
+
+                  const formattedTime = (() => {
+                    if (!lastMsgTime) return '';
+                    const date = new Date(lastMsgTime);
+                    if (isNaN(date.getTime())) return '';
+                    const now = new Date();
+                    if (date.toDateString() === now.toDateString()) {
+                      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    }
+                    const yesterday = new Date(now);
+                    yesterday.setDate(now.getDate() - 1);
+                    if (date.toDateString() === yesterday.toDateString()) {
+                      return 'Yesterday';
+                    }
+                    return date.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: '2-digit' });
+                  })();
 
                   return (
                     <div
@@ -860,18 +896,14 @@ export function ChatModule() {
                             <span>{participant?.fullName || 'User'}</span>
                             <span className="text-[10px] text-emerald-400 font-bold">✓</span>
                           </h3>
-                          <span className="text-[10px] text-slate-500 flex-shrink-0">
-                            {lastMsgTime
-                              ? new Date(lastMsgTime).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : ''}
+                          <span className="text-[10px] text-slate-500 flex-shrink-0 font-medium">
+                            {formattedTime}
                           </span>
                         </div>
 
-                        <p className="text-[11px] text-slate-400 line-clamp-1">
-                          {lastMsgPreview}
+                        <p className="text-[11px] text-slate-400 line-clamp-1 flex items-center gap-1">
+                          {isSelfLastMsg && <span className="text-emerald-400 font-extrabold text-[10px]">✓✓</span>}
+                          <span className="truncate">{lastMsgPreview}</span>
                         </p>
                       </div>
                     </div>

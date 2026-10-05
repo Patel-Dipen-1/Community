@@ -6,163 +6,568 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  TextInput,
   Modal,
   Alert,
+  TextInput,
+  ActivityIndicator,
+  Share,
+  Dimensions,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as ImagePicker from 'expo-image-picker';
 import { MainTabParamList, RootStackParamList } from '../../types/navigation.types';
 import { Header } from '../../components/common/Header';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
-import { ProductCard } from '../../components/common/ProductCard';
 import { EmptyState } from '../../components/common/EmptyState';
-import { useGetMyStoreQuery } from '../../store/api/storeApi';
-import { useCreateProductMutation } from '../../store/api/productApi';
+import { useGetMyStoreQuery, useUpdateStoreMutation } from '../../store/api/storeApi';
+import { useCreateProductMutation, useDeleteProductMutation } from '../../store/api/productApi';
+import { ENV_CONFIG } from '../../constants/config';
+import { authStorage } from '../../services/storage/authStorage';
+import { useAppSelector } from '../../hooks/useRedux';
 
 type Props = NativeStackScreenProps<MainTabParamList & RootStackParamList, 'Store'>;
 
+const { width } = Dimensions.get('window');
+
+/**
+ * Helper to upload local gallery image to backend API
+ */
+const uploadLocalImage = async (localUri: string): Promise<string> => {
+  try {
+    const formData = new FormData();
+    const filename = localUri.split('/').pop() || 'upload.jpg';
+    const match = /\.(\w+)$/.exec(filename);
+    const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+    formData.append('file', {
+      uri: localUri,
+      name: filename,
+      type,
+    } as any);
+
+    const token = await authStorage.getToken();
+    const response = await fetch(`${ENV_CONFIG.API_BASE_URL}/upload/single`, {
+      method: 'POST',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      body: formData,
+    });
+
+    const data = await response.json();
+    return data.url || localUri;
+  } catch (err) {
+    console.log('Image upload network fallback to local URI:', err);
+    return localUri;
+  }
+};
+
 export const StoreScreen: React.FC<Props> = ({ navigation }) => {
+  const { user } = useAppSelector((state) => state.auth);
+
+  // Store data queries & mutations
   const { data: storeData, isLoading, refetch } = useGetMyStoreQuery();
-  const [createProduct, { isLoading: isCreating }] = useCreateProductMutation();
+  const [updateStore, { isLoading: isUpdatingStore }] = useUpdateStoreMutation();
+  const [createProduct, { isLoading: isCreatingProduct }] = useCreateProductMutation();
+  const [deleteProduct] = useDeleteProductMutation();
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [code, setCode] = useState('');
-  const [moq, setMoq] = useState('10');
-  const [price, setPrice] = useState('500');
+  // Search & category filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
 
+  // Edit Store Modal state
+  const [editStoreModalOpen, setEditStoreModalOpen] = useState(false);
+  const [storeNameInput, setStoreNameInput] = useState('');
+  const [storeBioInput, setStoreBioInput] = useState('');
+  const [storeBannerUri, setStoreBannerUri] = useState('');
+  const [storeLogoUri, setStoreLogoUri] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  // Add Product Modal state
+  const [addProductModalOpen, setAddProductModalOpen] = useState(false);
+  const [prodTitle, setProdTitle] = useState('');
+  const [prodCode, setProdCode] = useState('');
+  const [prodPrice, setProdPrice] = useState('');
+  const [prodMoq, setProdMoq] = useState('10');
+  const [prodDesc, setProdDesc] = useState('');
+  const [prodCategory, setProdCategory] = useState('General');
+  const [prodImageUri, setProdImageUri] = useState('');
+
+  // Selected Product Detail Modal
+  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+
+  const store = storeData?.store;
+  const biz = store?.business || user?.business;
+  const products = store?.products || [];
+
+  // Extract unique categories
+  const categories = ['ALL', ...Array.from(new Set(products.map((p) => p.specs?.Category || 'General')))];
+
+  // Filter products by search & category
+  const filteredProducts = products.filter((p) => {
+    const matchesSearch =
+      !searchQuery.trim() ||
+      p.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.code?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCat = selectedCategory === 'ALL' || (p.specs?.Category || 'General') === selectedCategory;
+    return matchesSearch && matchesCat;
+  });
+
+  // Open Edit Store Modal with initial values
+  const handleOpenEditStore = () => {
+    setStoreNameInput(store?.name || biz?.shopName || '');
+    setStoreBioInput(store?.bio || '');
+    setStoreBannerUri(store?.bannerUrl || '');
+    setStoreLogoUri(store?.logoUrl || '');
+    setEditStoreModalOpen(true);
+  };
+
+  // Local Image Picker for Gallery / Storage
+  const handlePickLocalImage = async (onSelected: (uri: string) => void) => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission Required', 'Gallery access is needed to pick photos from your phone storage.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]?.uri) {
+        const localUri = result.assets[0].uri;
+        setIsUploadingImage(true);
+        const uploadedUrl = await uploadLocalImage(localUri);
+        setIsUploadingImage(false);
+        onSelected(uploadedUrl);
+        Alert.alert('Image Selected', 'Photo selected from local storage successfully!');
+      }
+    } catch (err) {
+      setIsUploadingImage(false);
+      Alert.alert('Image Error', 'Unable to pick image from local gallery.');
+    }
+  };
+
+  // Save Store Edit
+  const handleSaveStore = async () => {
+    if (!storeNameInput.trim()) {
+      Alert.alert('Store Name Required', 'Please enter a name for your store.');
+      return;
+    }
+
+    try {
+      await updateStore({
+        name: storeNameInput.trim(),
+        bio: storeBioInput.trim(),
+        bannerUrl: storeBannerUri,
+        logoUrl: storeLogoUri,
+      }).unwrap();
+
+      setEditStoreModalOpen(false);
+      refetch();
+      Alert.alert('Success', 'Store profile and branding updated!');
+    } catch (err: any) {
+      Alert.alert('Update Failed', err?.data?.error || 'Failed to update store.');
+    }
+  };
+
+  // Save New Product
   const handleCreateProduct = async () => {
-    if (!title.trim() || !code.trim() || !price.trim()) {
+    if (!prodTitle.trim() || !prodCode.trim() || !prodPrice.trim()) {
       Alert.alert('Missing Fields', 'Please fill in Title, SKU Code, and Price.');
       return;
     }
 
     try {
       await createProduct({
-        title: title.trim(),
-        code: code.trim(),
-        description: description.trim() || title.trim(),
-        moq: parseInt(moq, 10) || 1,
-        priceTiers: [{ minQty: parseInt(moq, 10) || 1, price: parseFloat(price) || 100 }],
-        images: ['https://via.placeholder.com/400x400.png?text=B2B+Product'],
-        specs: { Category: 'General Wholesale' },
-        communityId: storeData?.store?.business?.allowedCommunities?.[0] || 'clothing',
-        categoryId: 'cat-default',
-      }).unwrap();
+        title: prodTitle.trim(),
+        code: prodCode.trim(),
+        description: prodDesc.trim() || prodTitle.trim(),
+        moq: parseInt(prodMoq, 10) || 1,
+        priceTiers: [{ minQty: parseInt(prodMoq, 10) || 1, price: parseFloat(prodPrice) || 100 }],
+        images: [prodImageUri || 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=500&q=80'],
+        specs: { Category: prodCategory || 'General' },
+        communityId: biz?.allowedCommunities?.[0] || 'clothing',
+        isHotSelling: true,
+      } as any).unwrap();
 
-      Alert.alert('Success', `Product ${code} listed successfully!`);
-      setModalVisible(false);
-      setTitle('');
-      setCode('');
+      setAddProductModalOpen(false);
+      setProdTitle('');
+      setProdCode('');
+      setProdPrice('');
+      setProdImageUri('');
       refetch();
+      Alert.alert('Product Listed', `SKU ${prodCode} listed successfully in store!`);
     } catch (err: any) {
-      Alert.alert('Error', err?.data?.error || 'Failed to list product.');
+      Alert.alert('Listing Failed', err?.data?.error || 'Unable to create product.');
     }
   };
 
-  const store = storeData?.store;
-  const products = store?.products || [];
+  // Delete Product
+  const handleDeleteProduct = (productId: string, title: string) => {
+    Alert.alert('Delete Product', `Are you sure you want to remove "${title}" from your catalog?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteProduct(productId).unwrap();
+            refetch();
+            Alert.alert('Product Deleted', `"${title}" has been removed.`);
+          } catch (err: any) {
+            Alert.alert('Error', err?.data?.error || 'Failed to delete product.');
+          }
+        },
+      },
+    ]);
+  };
+
+  // Share Store Link
+  const handleShareStore = () => {
+    Share.share({
+      title: store?.name || 'B2B Wholesale Store',
+      message: `Check out our verified B2B store catalog on B2B Community Platform: ${ENV_CONFIG.SOCKET_URL}/store/${store?.slug || store?.id || 'me'}`,
+    });
+  };
 
   return (
     <View style={styles.container}>
       <Header
-        title={store?.name || 'B2B Showroom'}
-        subtitle={`Wholesale Catalog • SKU Deduplicated`}
+        title={store?.name || 'My B2B Showroom'}
+        subtitle="Web Parity B2B Catalog & Local Image Upload"
         rightElement={
-          <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
-            <Text style={styles.addBtnText}>+ Add Product</Text>
+          <TouchableOpacity style={styles.headerSharePill} onPress={handleShareStore}>
+            <Text style={styles.headerShareText}>🔗 Share</Text>
           </TouchableOpacity>
         }
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Store Profile Banner Header */}
-        <View style={styles.bannerContainer}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* ============================================================ */}
+        {/* 1. STORE HERO BANNER & BRANDING HEADER */}
+        {/* ============================================================ */}
+        <View style={styles.heroBannerCard}>
           <Image
             source={{
-              uri: store?.bannerUrl || 'https://via.placeholder.com/600x200.png?text=Wholesale+Showroom',
+              uri: store?.bannerUrl || 'https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=1000&q=80',
             }}
-            style={styles.bannerImage}
+            style={styles.heroBannerImage}
           />
-          <View style={styles.storeOverlay}>
-            <Image
-              source={{
-                uri: store?.logoUrl || 'https://via.placeholder.com/100?text=Logo',
-              }}
-              style={styles.storeLogo}
-            />
-            <View style={styles.storeInfo}>
-              <Text style={styles.storeName}>{store?.name || 'Royal Wholesale Store'}</Text>
-              <Text style={styles.storeLoc}>
-                📍 {store?.business?.city || 'Surat'}, {store?.business?.state || 'Gujarat'}
-              </Text>
-              {store?.business?.verificationTag && (
-                <Text style={styles.verifiedBadge}>✓ Super Admin Verified Vendor</Text>
+          <View style={styles.bannerDarkGradient} />
+
+          <View style={styles.heroContentRow}>
+            {/* Logo Avatar */}
+            <View style={styles.storeLogoBox}>
+              {store?.logoUrl ? (
+                <Image source={{ uri: store.logoUrl }} style={styles.storeLogoImage} />
+              ) : (
+                <Text style={styles.storeLogoInitial}>{store?.name?.charAt(0).toUpperCase() || 'S'}</Text>
               )}
+            </View>
+
+            {/* Store Meta */}
+            <View style={styles.heroMetaBox}>
+              <View style={styles.titleBadgeRow}>
+                <Text style={styles.heroStoreTitle} numberOfLines={1}>
+                  {store?.name || 'Royal Wholesale Store'}
+                </Text>
+                {biz?.verificationTag && <Text style={styles.verifiedTagPill}>✓ VERIFIED B2B</Text>}
+              </View>
+
+              <Text style={styles.heroSubText} numberOfLines={1}>
+                {biz?.shopName || 'Wholesale Business Catalog'} • 📍 {biz?.city || 'Surat'}, {biz?.state || 'Gujarat'}
+              </Text>
+
+              <View style={styles.communityPillRow}>
+                {biz?.allowedCommunities?.map((comm: string) => (
+                  <View key={comm} style={styles.commTagPill}>
+                    <Text style={styles.commTagText}>🏷️ {comm}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          {/* Action CTAs Row */}
+          <View style={styles.heroActionsRow}>
+            <TouchableOpacity style={styles.editStoreBtn} onPress={handleOpenEditStore}>
+              <Text style={styles.editStoreBtnText}>✏️ Edit Store</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.addProductBtn} onPress={() => setAddProductModalOpen(true)}>
+              <Text style={styles.addProductBtnText}>➕ Add Product</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Store Stats Bar */}
+          <View style={styles.statsBar}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{products.length}</Text>
+              <Text style={styles.statLabel}>Total Products</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statNumberGreen}>{products.filter((p) => p.isActive).length}</Text>
+              <Text style={styles.statLabel}>Active Listings</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statNumberIndigo}>{user?.fullName || 'Owner'}</Text>
+              <Text style={styles.statLabel}>Proprietor</Text>
             </View>
           </View>
         </View>
 
-        {/* Bio Card */}
-        <View style={styles.bioCard}>
-          <Text style={styles.bioTitle}>About Store</Text>
-          <Text style={styles.bioText}>
-            {store?.bio || 'Leading wholesale manufacturer & distributor serving verified B2B buyers across India.'}
-          </Text>
+        {/* Store Bio */}
+        {store?.bio ? (
+          <View style={styles.bioCard}>
+            <Text style={styles.bioTitle}>Store Bio & Overview</Text>
+            <Text style={styles.bioText}>{store.bio}</Text>
+          </View>
+        ) : null}
+
+        {/* ============================================================ */}
+        {/* 2. CATEGORY TABS & SEARCH TOOLBAR */}
+        {/* ============================================================ */}
+        <View style={styles.filterToolbar}>
+          {/* Search Box */}
+          <View style={styles.searchBox}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search products by title or SKU..."
+              placeholderTextColor="#64748b"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+
+          {/* Category Horizontal Filter Pills */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catScroll}>
+            {categories.map((cat) => (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.catPill, selectedCategory === cat && styles.catPillActive]}
+                onPress={() => setSelectedCategory(cat)}
+              >
+                <Text style={[styles.catPillText, selectedCategory === cat && styles.catPillTextActive]}>
+                  {cat === 'ALL' ? `All Items (${products.length})` : cat}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
 
-        {/* Products Section */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>📦 Catalog Products ({products.length})</Text>
+        {/* ============================================================ */}
+        {/* 3. PRODUCT CATALOG GRID */}
+        {/* ============================================================ */}
+        <View style={styles.catalogSectionHeader}>
+          <Text style={styles.catalogSectionTitle}>📦 Showroom Catalog ({filteredProducts.length})</Text>
         </View>
 
         {isLoading ? (
-          <Text style={styles.loadingText}>Loading store catalog...</Text>
-        ) : products.length === 0 ? (
+          <ActivityIndicator size="large" color="#818cf8" style={{ marginVertical: 30 }} />
+        ) : filteredProducts.length === 0 ? (
           <EmptyState
             icon="🏪"
-            title="No Listed Products"
-            description="Your store catalog currently has no products listed. Click '+ Add Product' to showcase your inventory."
-            actionTitle="+ Add First Product"
-            onAction={() => setModalVisible(true)}
+            title="No Products Found"
+            description={
+              searchQuery || selectedCategory !== 'ALL'
+                ? 'No catalog items matched your search query or category filter.'
+                : 'Your store catalog is empty. Tap "+ Add Product" to publish items from gallery.'
+            }
+            actionTitle="+ Add Product from Gallery"
+            onAction={() => setAddProductModalOpen(true)}
           />
         ) : (
-          products.map((item) => (
-            <ProductCard
-              key={item.id}
-              product={item}
-              onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
-            />
-          ))
+          <View style={styles.productGrid}>
+            {filteredProducts.map((p) => {
+              const priceVal = p.priceTiers?.[0]?.price || 100;
+              const imgUrl = p.images?.[0] || 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=500&q=80';
+              return (
+                <View key={p.id} style={styles.productCard}>
+                  {/* Image & SKU Badge */}
+                  <TouchableOpacity activeOpacity={0.8} onPress={() => setSelectedProduct(p)}>
+                    <View style={styles.prodImgWrapper}>
+                      <Image source={{ uri: imgUrl }} style={styles.prodImage} />
+                      <View style={styles.skuBadge}>
+                        <Text style={styles.skuBadgeText}>{p.code}</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Card Meta */}
+                  <View style={styles.prodMeta}>
+                    <Text style={styles.prodCategoryText}>{p.specs?.Category || 'Wholesale Item'}</Text>
+                    <Text style={styles.prodTitle} numberOfLines={2}>
+                      {p.title}
+                    </Text>
+
+                    <View style={styles.priceRow}>
+                      <Text style={styles.priceText}>₹{priceVal}</Text>
+                      <Text style={styles.moqText}>MOQ: {p.moq || 10} pcs</Text>
+                    </View>
+                  </View>
+
+                  {/* Actions Footer */}
+                  <View style={styles.prodFooterActions}>
+                    <TouchableOpacity style={styles.detailsBtn} onPress={() => setSelectedProduct(p)}>
+                      <Text style={styles.detailsBtnText}>Details 👁️</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.deleteBtn}
+                      onPress={() => handleDeleteProduct(p.id, p.title)}
+                    >
+                      <Text style={styles.deleteBtnText}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
         )}
       </ScrollView>
 
-      {/* Add Product Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      {/* ============================================================ */}
+      {/* MODAL 1: EDIT STORE (WITH LOCAL IMAGE UPLOAD) */}
+      {/* ============================================================ */}
+      <Modal visible={editStoreModalOpen} animationType="slide" transparent>
         <View style={styles.modalBg}>
           <ScrollView contentContainerStyle={styles.modalScroll}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>📦 List New SKU Product</Text>
-              <Text style={styles.modalSub}>
-                Unique SKU code eliminates duplicate media uploads and saves server storage.
-              </Text>
+              <Text style={styles.modalTitleBlue}>✏️ Edit Store Profile & Branding</Text>
 
-              <Input label="Product Title *" placeholder="e.g. Cotton Printed Kurti" value={title} onChangeText={setTitle} />
-              <Input label="Unique SKU Code *" placeholder="e.g. SKU-CLOTH-901" value={code} onChangeText={setCode} />
-              <Input label="Price (₹) *" placeholder="e.g. 350" keyboardType="numeric" value={price} onChangeText={setPrice} />
-              <Input label="Minimum Order Quantity (MOQ) *" placeholder="e.g. 20" keyboardType="numeric" value={moq} onChangeText={setMoq} />
-              <Input label="Description / Specification" placeholder="Describe fabric, sizes, terms..." value={description} onChangeText={setDescription} multiline numberOfLines={3} />
+              <Input label="Store Name *" value={storeNameInput} onChangeText={setStoreNameInput} />
+              <Input label="Store Bio / Tagline" value={storeBioInput} onChangeText={setStoreBioInput} multiline numberOfLines={3} />
+
+              {/* Local Storage Banner Image Picker */}
+              <View style={styles.pickerSection}>
+                <Text style={styles.pickerLabel}>Store Banner Image</Text>
+                {storeBannerUri ? (
+                  <Image source={{ uri: storeBannerUri }} style={styles.pickerPreviewBanner} />
+                ) : null}
+                <TouchableOpacity
+                  style={styles.pickImageBtn}
+                  onPress={() => handlePickLocalImage(setStoreBannerUri)}
+                >
+                  <Text style={styles.pickImageBtnText}>📸 Pick Banner Image from Phone</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Local Storage Logo Image Picker */}
+              <View style={styles.pickerSection}>
+                <Text style={styles.pickerLabel}>Store Logo Image</Text>
+                {storeLogoUri ? (
+                  <Image source={{ uri: storeLogoUri }} style={styles.pickerPreviewLogo} />
+                ) : null}
+                <TouchableOpacity
+                  style={styles.pickImageBtn}
+                  onPress={() => handlePickLocalImage(setStoreLogoUri)}
+                >
+                  <Text style={styles.pickImageBtnText}>📸 Pick Logo Image from Phone</Text>
+                </TouchableOpacity>
+              </View>
+
+              {isUploadingImage && (
+                <View style={styles.uploadingRow}>
+                  <ActivityIndicator size="small" color="#818cf8" />
+                  <Text style={styles.uploadingText}>Uploading photo from local storage...</Text>
+                </View>
+              )}
 
               <View style={styles.modalActions}>
-                <Button title="Cancel" variant="secondary" onPress={() => setModalVisible(false)} style={{ flex: 1 }} />
-                <Button title="List Product" loading={isCreating} onPress={handleCreateProduct} style={{ flex: 1 }} />
+                <Button title="Cancel" variant="secondary" onPress={() => setEditStoreModalOpen(false)} style={{ flex: 1 }} />
+                <Button title="Save Store" loading={isUpdatingStore} onPress={handleSaveStore} style={{ flex: 1 }} />
               </View>
             </View>
           </ScrollView>
         </View>
       </Modal>
+
+      {/* ============================================================ */}
+      {/* MODAL 2: ADD PRODUCT (WITH LOCAL IMAGE UPLOAD) */}
+      {/* ============================================================ */}
+      <Modal visible={addProductModalOpen} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <ScrollView contentContainerStyle={styles.modalScroll}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitleBlue}>📦 Add New Product (Pick from Storage)</Text>
+
+              <Input label="Product Title *" placeholder="e.g. 60s Combed Cotton Fabric" value={prodTitle} onChangeText={setProdTitle} />
+              <Input label="SKU Code *" placeholder="e.g. SKU-FAB-102" value={prodCode} onChangeText={setProdCode} />
+              <Input label="Wholesale Price (₹) *" placeholder="e.g. 185" keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
+              <Input label="MOQ (Units) *" placeholder="e.g. 100" keyboardType="numeric" value={prodMoq} onChangeText={setProdMoq} />
+              <Input label="Category" placeholder="e.g. Clothing & Textiles" value={prodCategory} onChangeText={setProdCategory} />
+              <Input label="Description" placeholder="Fabric details, terms..." value={prodDesc} onChangeText={setProdDesc} multiline numberOfLines={3} />
+
+              {/* Local Storage Product Image Picker */}
+              <View style={styles.pickerSection}>
+                <Text style={styles.pickerLabel}>Product Photo (Local Device)</Text>
+                {prodImageUri ? (
+                  <Image source={{ uri: prodImageUri }} style={styles.pickerPreviewBanner} />
+                ) : null}
+                <TouchableOpacity
+                  style={styles.pickImageBtn}
+                  onPress={() => handlePickLocalImage(setProdImageUri)}
+                >
+                  <Text style={styles.pickImageBtnText}>📸 Pick Product Photo from Phone Storage</Text>
+                </TouchableOpacity>
+              </View>
+
+              {isUploadingImage && (
+                <View style={styles.uploadingRow}>
+                  <ActivityIndicator size="small" color="#818cf8" />
+                  <Text style={styles.uploadingText}>Uploading photo from device...</Text>
+                </View>
+              )}
+
+              <View style={styles.modalActions}>
+                <Button title="Cancel" variant="secondary" onPress={() => setAddProductModalOpen(false)} style={{ flex: 1 }} />
+                <Button title="Publish Product" loading={isCreatingProduct} onPress={handleCreateProduct} style={{ flex: 1 }} />
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ============================================================ */}
+      {/* MODAL 3: SELECTED PRODUCT DETAIL PREVIEW */}
+      {/* ============================================================ */}
+      {selectedProduct && (
+        <Modal visible animationType="fade" transparent>
+          <View style={styles.modalBg}>
+            <View style={styles.modalContent}>
+              <View style={styles.prodDetailHeader}>
+                <Text style={styles.prodDetailTitle} numberOfLines={1}>{selectedProduct.title}</Text>
+                <TouchableOpacity onPress={() => setSelectedProduct(null)}>
+                  <Text style={styles.closeBtnText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Image
+                source={{ uri: selectedProduct.images?.[0] || 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=500&q=80' }}
+                style={styles.detailImage}
+              />
+
+              <View style={styles.detailMetaRow}>
+                <Text style={styles.detailSku}>SKU: {selectedProduct.code}</Text>
+                <Text style={styles.detailPrice}>₹{selectedProduct.priceTiers?.[0]?.price || 100} / unit</Text>
+              </View>
+
+              <Text style={styles.detailMoq}>Minimum Order Quantity (MOQ): {selectedProduct.moq || 10} units</Text>
+              <Text style={styles.detailDesc}>{selectedProduct.description || 'No description provided.'}</Text>
+
+              <Button title="Close" variant="secondary" onPress={() => setSelectedProduct(null)} style={{ marginTop: 14 }} />
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 };
@@ -170,33 +575,108 @@ export const StoreScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617' },
   scrollContent: { padding: 16 },
-  addBtn: {
-    backgroundColor: '#4f46e5',
+
+  headerSharePill: {
+    backgroundColor: '#1e293b',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
   },
-  addBtnText: { color: '#ffffff', fontSize: 11, fontWeight: '800' },
-  bannerContainer: {
-    borderRadius: 16,
-    overflow: 'hidden',
+  headerShareText: { color: '#818cf8', fontSize: 11, fontWeight: '800' },
+
+  // Hero Card
+  heroBannerCard: {
     backgroundColor: '#0f172a',
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#1e293b',
-    marginBottom: 14,
+    overflow: 'hidden',
+    marginBottom: 16,
   },
-  bannerImage: { width: '100%', height: 120 },
-  storeOverlay: {
+  heroBannerImage: { width: '100%', height: 130 },
+  bannerDarkGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 130,
+    backgroundColor: 'rgba(2, 6, 23, 0.4)',
+  },
+  heroContentRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#0f172a',
+    padding: 16,
+    marginTop: -30,
+    alignItems: 'flex-end',
   },
-  storeLogo: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#1e293b', marginRight: 12 },
-  storeInfo: { flex: 1 },
-  storeName: { color: '#ffffff', fontSize: 16, fontWeight: '900' },
-  storeLoc: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
-  verifiedBadge: { color: '#38bdf8', fontSize: 10, fontWeight: '800', marginTop: 2 },
+  storeLogoBox: {
+    width: 68,
+    height: 68,
+    borderRadius: 18,
+    backgroundColor: '#1e1b4b',
+    borderWidth: 3,
+    borderColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  storeLogoImage: { width: '100%', height: '100%', borderRadius: 15 },
+  storeLogoInitial: { color: '#818cf8', fontSize: 28, fontWeight: '900' },
+  heroMetaBox: { flex: 1 },
+  titleBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  heroStoreTitle: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  verifiedTagPill: {
+    color: '#4edea3',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    fontSize: 9,
+    fontWeight: '800',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  heroSubText: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
+  communityPillRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  commTagPill: { backgroundColor: '#1e293b', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  commTagText: { color: '#c0c1ff', fontSize: 9, fontWeight: '700' },
+
+  heroActionsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 16 },
+  editStoreBtn: {
+    flex: 1,
+    height: 40,
+    backgroundColor: '#1e293b',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  editStoreBtnText: { color: '#cbd5e1', fontSize: 12, fontWeight: '800' },
+  addProductBtn: {
+    flex: 1,
+    height: 40,
+    backgroundColor: '#00a572',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addProductBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '900' },
+
+  statsBar: {
+    flexDirection: 'row',
+    backgroundColor: '#151b2d',
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  statItem: { flex: 1, alignItems: 'center' },
+  statNumber: { color: '#ffffff', fontSize: 16, fontWeight: '900' },
+  statNumberGreen: { color: '#4edea3', fontSize: 16, fontWeight: '900' },
+  statNumberIndigo: { color: '#818cf8', fontSize: 14, fontWeight: '900' },
+  statLabel: { color: '#64748b', fontSize: 10, marginTop: 2 },
+  statDivider: { width: 1, height: 24, backgroundColor: '#1e293b' },
+
   bioCard: {
     backgroundColor: '#0f172a',
     borderRadius: 14,
@@ -205,15 +685,134 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 16,
   },
-  bioTitle: { color: '#818cf8', fontSize: 13, fontWeight: '800', marginBottom: 4 },
+  bioTitle: { color: '#818cf8', fontSize: 12, fontWeight: '800', marginBottom: 4 },
   bioText: { color: '#cbd5e1', fontSize: 12, lineHeight: 18 },
-  sectionHeader: { marginBottom: 12 },
-  sectionTitle: { color: '#f8fafc', fontSize: 16, fontWeight: '800' },
-  loadingText: { color: '#94a3b8', textAlign: 'center', marginVertical: 30 },
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center' },
+
+  // Filters
+  filterToolbar: { marginBottom: 16 },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    marginBottom: 10,
+  },
+  searchIcon: { fontSize: 14, marginRight: 8 },
+  searchInput: { flex: 1, color: '#ffffff', fontSize: 13 },
+
+  catScroll: { flexDirection: 'row' },
+  catPill: {
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    marginRight: 8,
+  },
+  catPillActive: { backgroundColor: '#00a572', borderColor: '#00a572' },
+  catPillText: { color: '#94a3b8', fontSize: 11, fontWeight: '700' },
+  catPillTextActive: { color: '#ffffff', fontWeight: '900' },
+
+  // Catalog Grid
+  catalogSectionHeader: { marginBottom: 12 },
+  catalogSectionTitle: { color: '#ffffff', fontSize: 16, fontWeight: '900' },
+
+  productGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  productCard: {
+    width: (width - 44) / 2,
+    backgroundColor: '#0f172a',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  prodImgWrapper: { width: '100%', height: 130, backgroundColor: '#151b2d', position: 'relative' },
+  prodImage: { width: '100%', height: '100%' },
+  skuBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: 'rgba(2, 6, 23, 0.85)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  skuBadgeText: { color: '#4edea3', fontSize: 9, fontWeight: '900' },
+
+  prodMeta: { padding: 10 },
+  prodCategoryText: { color: '#64748b', fontSize: 9, fontWeight: '700' },
+  prodTitle: { color: '#ffffff', fontSize: 12, fontWeight: '800', marginTop: 2, height: 32 },
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
+  priceText: { color: '#4edea3', fontSize: 14, fontWeight: '900' },
+  moqText: { color: '#94a3b8', fontSize: 9, fontWeight: '600' },
+
+  prodFooterActions: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+    padding: 8,
+    gap: 6,
+  },
+  detailsBtn: {
+    flex: 1,
+    height: 32,
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsBtnText: { color: '#f8fafc', fontSize: 11, fontWeight: '700' },
+  deleteBtn: {
+    width: 32,
+    height: 32,
+    backgroundColor: 'rgba(225, 29, 72, 0.15)',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteBtnText: { fontSize: 13 },
+
+  // Modals
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center' },
   modalScroll: { padding: 20, flexGrow: 1, justifyContent: 'center' },
   modalContent: { backgroundColor: '#0f172a', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#334155' },
-  modalTitle: { color: '#ffffff', fontSize: 18, fontWeight: '900', marginBottom: 4 },
-  modalSub: { color: '#94a3b8', fontSize: 12, marginBottom: 16 },
+  modalTitleBlue: { color: '#818cf8', fontSize: 18, fontWeight: '900', marginBottom: 14 },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+
+  pickerSection: { marginBottom: 14 },
+  pickerLabel: { color: '#cbd5e1', fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  pickImageBtn: {
+    backgroundColor: '#1e293b',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    alignItems: 'center',
+  },
+  pickImageBtnText: { color: '#818cf8', fontSize: 12, fontWeight: '800' },
+  pickerPreviewBanner: { width: '100%', height: 90, borderRadius: 10, marginBottom: 8 },
+  pickerPreviewLogo: { width: 60, height: 60, borderRadius: 30, marginBottom: 8 },
+
+  uploadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  uploadingText: { color: '#818cf8', fontSize: 11, fontWeight: '700' },
+
+  prodDetailHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  prodDetailTitle: { color: '#ffffff', fontSize: 16, fontWeight: '900', flex: 1 },
+  closeBtnText: { color: '#94a3b8', fontSize: 18, fontWeight: '900', paddingHorizontal: 8 },
+  detailImage: { width: '100%', height: 180, borderRadius: 12, marginBottom: 12 },
+  detailMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  detailSku: { color: '#4edea3', fontSize: 12, fontWeight: '900' },
+  detailPrice: { color: '#818cf8', fontSize: 16, fontWeight: '900' },
+  detailMoq: { color: '#cbd5e1', fontSize: 12, fontWeight: '700', marginBottom: 8 },
+  detailDesc: { color: '#94a3b8', fontSize: 12, lineHeight: 18 },
 });
+

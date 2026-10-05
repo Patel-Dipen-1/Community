@@ -21,19 +21,23 @@ import { useGetMyStoreQuery } from '../store/api/storeApi';
 import { socketService } from '../services/socket/socketService';
 import { useAppSelector } from '../hooks/useRedux';
 
+import { ENV_CONFIG } from '../constants/config';
+
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { conversationId, recipientId, recipientName } = route.params;
-  const { user } = useAppSelector((state) => state.auth);
+  const { user, token } = useAppSelector((state) => state.auth);
 
+  const [activeConvId, setActiveConvId] = useState<string | undefined>(conversationId);
   const [messageText, setMessageText] = useState('');
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const [quickCatalogVisible, setQuickCatalogVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   const { data: messagesData, refetch } = useGetMessagesQuery(
-    { conversationId },
-    { skip: !conversationId }
+    { conversationId: activeConvId || '' },
+    { skip: !activeConvId }
   );
 
   const { data: myStoreData } = useGetMyStoreQuery();
@@ -43,23 +47,29 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   useEffect(() => {
     socketService.connect();
     socketService.on('message:new', (msg) => {
-      if (msg.conversationId === conversationId || msg.senderId === recipientId) {
+      if (msg.conversationId === activeConvId || msg.senderId === recipientId) {
+        refetch();
+      }
+    });
+    socketService.on('receive_message', (msg) => {
+      if (msg.conversationId === activeConvId || msg.senderId === recipientId) {
         refetch();
       }
     });
 
     return () => {
       socketService.off('message:new');
+      socketService.off('receive_message');
     };
-  }, [conversationId, recipientId]);
+  }, [activeConvId, recipientId]);
 
   const handleSendText = async (customText?: string, customProductCode?: string, customMediaUrl?: string) => {
     const textToSend = customText ?? messageText.trim();
     if (!textToSend && !customProductCode && !customMediaUrl) return;
 
     try {
-      await sendMessage({
-        conversationId,
+      const res = await sendMessage({
+        conversationId: activeConvId,
         recipientId,
         text: textToSend || undefined,
         productCode: customProductCode,
@@ -67,22 +77,51 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         clientMessageId: `msg-${Date.now()}`,
       }).unwrap();
 
+      const newConvId = (res as any)?.conversationId || (res as any)?.message?.conversationId;
+      if (newConvId && !activeConvId) {
+        setActiveConvId(newConvId);
+      }
+
       if (!customText && !customProductCode) setMessageText('');
       refetch();
     } catch (err: any) {
-      Alert.alert('Send Failed', err?.data?.error || 'Unable to send message.');
+      Alert.alert('Send Failed', err?.data?.error || err?.message || 'Unable to send message.');
     }
   };
 
   const handlePickAttachment = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      quality: 0.8,
-    });
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        quality: 0.8,
+      });
 
-    if (!result.canceled && result.assets[0]?.uri) {
-      const selectedUri = result.assets[0].uri;
-      handleSendText('📷 Sent Image Attachment', undefined, selectedUri);
+      if (!result.canceled && result.assets[0]?.uri) {
+        setUploadingMedia(true);
+        const asset = result.assets[0];
+        const formData = new FormData();
+        formData.append('file', {
+          uri: asset.uri,
+          name: asset.fileName || `attachment_${Date.now()}.jpg`,
+          type: asset.mimeType || 'image/jpeg',
+        } as any);
+
+        const uploadRes = await fetch(`${ENV_CONFIG.API_BASE_URL}/upload/single`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+
+        const uploadData = await uploadRes.json();
+        const mediaUrl = uploadData.url || uploadData.file?.url || asset.uri;
+        setUploadingMedia(false);
+        await handleSendText('📷 Media Attachment', undefined, mediaUrl);
+      }
+    } catch (err: any) {
+      setUploadingMedia(false);
+      Alert.alert('Upload Error', 'Failed to upload attachment.');
     }
   };
 

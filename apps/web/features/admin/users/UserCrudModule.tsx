@@ -20,6 +20,7 @@ import {
   UserRecord,
   UserMedia,
 } from './users.config';
+import { formatMediaUrl } from '../../../lib/utils/media';
 
 import {
   useGetAdminUsersQuery,
@@ -925,16 +926,19 @@ export function UserCrudModule() {
                           <div className="relative w-full h-44 bg-slate-950 overflow-hidden">
                             {isVid ? (
                               <video
-                                src={m.url}
+                                src={formatMediaUrl(m.url)}
                                 controls
                                 preload="metadata"
                                 className="w-full h-full object-cover"
                               />
                             ) : (
                               <img
-                                src={m.url}
+                                src={formatMediaUrl(m.url)}
                                 alt={m.title || `Media file ${idx + 1}`}
                                 className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800';
+                                }}
                               />
                             )}
 
@@ -1039,16 +1043,19 @@ export function UserCrudModule() {
               {checkIsVideo(inspectingMedia.mediaList[inspectingMedia.activeIndex]) ? (
                 <video
                   key={inspectingMedia.mediaList[inspectingMedia.activeIndex].url}
-                  src={inspectingMedia.mediaList[inspectingMedia.activeIndex].url}
+                  src={formatMediaUrl(inspectingMedia.mediaList[inspectingMedia.activeIndex].url)}
                   controls
                   autoPlay
                   className="max-h-[65vh] max-w-full rounded-2xl border border-indigo-500/40 shadow-2xl bg-black"
                 />
               ) : (
                 <img
-                  src={inspectingMedia.mediaList[inspectingMedia.activeIndex].url}
+                  src={formatMediaUrl(inspectingMedia.mediaList[inspectingMedia.activeIndex].url)}
                   alt="Inspection media view"
                   className="max-h-[65vh] max-w-full object-contain rounded-2xl border border-slate-700 shadow-2xl"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800';
+                  }}
                 />
               )}
             </div>
@@ -1082,9 +1089,9 @@ export function UserCrudModule() {
                   }`}
                 >
                   {isVid ? (
-                    <video src={media.url} className="w-full h-full object-cover pointer-events-none" />
+                    <video src={formatMediaUrl(media.url)} className="w-full h-full object-cover pointer-events-none" />
                   ) : (
-                    <img src={media.url} alt={`Thumb ${idx}`} className="w-full h-full object-cover" />
+                    <img src={formatMediaUrl(media.url)} alt={`Thumb ${idx}`} className="w-full h-full object-cover" />
                   )}
                   <span className="absolute bottom-0.5 right-0.5 text-[8px] bg-slate-950/80 px-1 rounded text-white font-bold">
                     {isVid ? '🎥' : '📷'}

@@ -22,7 +22,7 @@ export async function getUserCategoryProfile(userId: string): Promise<UserCatego
 
   if (!user) return null;
 
-  const isApproved = Boolean(user.isVerified || user.status === 'APPROVED');
+  const isApproved = Boolean(user.status !== 'BLOCKED' && (user.status as string) !== 'BLACK');
   const isSuperAdmin =
     user.email === 'dnpatel2002@gmail.com' || user.business?.assignedRole === 'SUPER_ADMIN';
   const allowedCommunities = user.business?.allowedCommunities || ['clothing'];
@@ -49,7 +49,7 @@ export function hasMatchingCategory(
   isSuperAdmin = false
 ): boolean {
   if (isSuperAdmin) return true;
-  if (!user1Categories || !user2Categories) return false;
+  if (!user1Categories || !user2Categories || user1Categories.length === 0 || user2Categories.length === 0) return true;
 
   const set2 = new Set(user2Categories.map((c) => c.toLowerCase()));
   return user1Categories.some((c) => set2.has(c.toLowerCase()));
@@ -57,8 +57,8 @@ export function hasMatchingCategory(
 
 /**
  * Verify Direct Chat eligibility between two users:
- * 1. Both users must have status = 'APPROVED' (or isVerified)
- * 2. Both users must share at least ONE active trade category
+ * 1. Both users must be active (not BLOCKED)
+ * 2. Both users share trade categories or general access
  */
 export async function verifyDirectChatAccess(senderId: string, recipientId: string) {
   const [sender, recipient] = await Promise.all([
@@ -70,9 +70,9 @@ export async function verifyDirectChatAccess(senderId: string, recipientId: stri
     throw new Error('Sender user account not found.');
   }
 
-  if (!sender.isApproved && !sender.isSuperAdmin) {
+  if (!sender.isApproved) {
     throw new Error(
-      `RESTRICTED_NOT_APPROVED: Your account status is '${sender.status}'. Direct Chat is available only when both users are APPROVED.`
+      `USER_BLOCKED: Your account status is '${sender.status}'. Direct Chat is disabled for blocked accounts.`
     );
   }
 
@@ -80,9 +80,9 @@ export async function verifyDirectChatAccess(senderId: string, recipientId: stri
     throw new Error('Recipient user account not found.');
   }
 
-  if (!recipient.isApproved && !sender.isSuperAdmin) {
+  if (!recipient.isApproved) {
     throw new Error(
-      `RESTRICTED_NOT_APPROVED: User '${recipient.fullName}' is not APPROVED (status: '${recipient.status}'). Direct Chat is available only when both users are APPROVED.`
+      `USER_BLOCKED: User '${recipient.fullName}' is currently blocked.`
     );
   }
 

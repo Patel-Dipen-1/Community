@@ -19,8 +19,9 @@ router.post('/conversations', ChatController.getOrCreateConversation);
 // Get messages for a specific conversation
 router.get('/conversations/:id/messages', ChatController.getMessages);
 
-// Send message to an existing conversation
+// Send message to an existing conversation or directly
 router.post('/conversations/:id/messages', ChatController.sendMessage);
+router.post('/messages', ChatController.sendMessage);
 
 // React to a message
 router.post('/messages/:id/react', ChatController.reactToMessage);

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { formatMediaUrl } from '../../../lib/utils/media';
 
 interface ProductCardProps {
   product: any;
@@ -14,7 +15,7 @@ export function ProductCard({ product, onSelectProduct }: ProductCardProps) {
   const user = business?.user;
 
   const imagesList = Array.isArray(product?.images) && product.images.length > 0
-    ? product.images
+    ? product.images.map((img: string) => formatMediaUrl(img))
     : ['https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=600'];
 
   const [currentImgIdx, setCurrentImgIdx] = React.useState(0);

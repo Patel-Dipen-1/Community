@@ -24,10 +24,25 @@ export interface ChatMessage {
 }
 
 export interface ConversationItem {
-  id: string;
-  user1Id: string;
-  user2Id: string;
-  otherUser: {
+  id?: string;
+  conversationId?: string;
+  user1Id?: string;
+  user2Id?: string;
+  participant?: {
+    userId: string;
+    fullName: string;
+    mobileNumber?: string;
+    shopName?: string;
+    assignedRole?: string;
+    avatar?: string;
+    city?: string;
+    business?: {
+      shopName: string;
+      city: string;
+      verificationTag: boolean;
+    };
+  };
+  otherUser?: {
     id: string;
     fullName: string;
     avatar?: string;
@@ -66,11 +81,51 @@ export const chatApi = baseApi.injectEndpoints({
       { message: ChatMessage },
       { conversationId?: string; recipientId?: string; text?: string; productCode?: string; mediaUrl?: string; replyToId?: string; clientMessageId?: string }
     >({
-      query: (data) => ({
-        url: '/chat/messages',
-        method: 'POST',
-        body: data,
-      }),
+      async queryFn(arg, api, extraOptions, baseQuery) {
+        let convId = arg.conversationId;
+
+        // If conversationId is missing, initialize conversation first via POST /chat/conversations
+        if (!convId) {
+          if (!arg.recipientId) {
+            return { error: { status: 400, data: { error: 'conversationId or recipientId is required' } } };
+          }
+          const convRes = await baseQuery({
+            url: '/chat/conversations',
+            method: 'POST',
+            body: { recipientUserId: arg.recipientId },
+          });
+          if (convRes.error) return { error: convRes.error };
+          const convData = convRes.data as any;
+          convId = convData.conversationId || convData.id;
+        }
+
+        // Post to /chat/conversations/:id/messages (compatible with both hosted & local API)
+        const sendRes = await baseQuery({
+          url: `/chat/conversations/${convId}/messages`,
+          method: 'POST',
+          body: {
+            text: arg.text,
+            productCode: arg.productCode,
+            mediaUrl: arg.mediaUrl,
+            clientMessageId: arg.clientMessageId,
+          },
+        });
+
+        if (sendRes.error) {
+          // Fallback to POST /chat/messages if needed
+          const fallbackRes = await baseQuery({
+            url: '/chat/messages',
+            method: 'POST',
+            body: { ...arg, conversationId: convId },
+          });
+          if (fallbackRes.error) return { error: fallbackRes.error };
+          const fbData = fallbackRes.data as any;
+          return { data: { message: fbData.message || fbData } };
+        }
+
+        const sendData = sendRes.data as any;
+        return { data: { message: sendData.message || sendData } };
+      },
       invalidatesTags: ['Conversations', 'Messages'],
     }),
 

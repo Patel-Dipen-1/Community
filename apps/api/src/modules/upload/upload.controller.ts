@@ -5,7 +5,7 @@ const SERVER_URL = process.env.SERVER_URL || 'http://localhost:5000';
 
 export class UploadController {
   // Helper to extract relative URL path from disk destination
-  private static getPublicFileUrl(file: Express.Multer.File): string {
+  private static getPublicFileUrl(req: Request, file: Express.Multer.File): string {
     const fileType = file.mimetype.startsWith('video/')
       ? 'videos'
       : file.mimetype.startsWith('image/')
@@ -17,8 +17,11 @@ export class UploadController {
     const relativePath =
       file.destination.replace(/\\/g, '/').split('/uploads/')[1] || `users/general/${fileType}`;
 
-    return `${SERVER_URL}/uploads/${relativePath}/${file.filename}`;
+    const host = req.get('host');
+    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    const serverUrl = process.env.SERVER_URL || `${protocol}://${host}`;
 
+    return `${serverUrl.replace(/\/$/, '')}/uploads/${relativePath}/${file.filename}`;
   }
 
   // Handle Single File Upload
@@ -28,7 +31,7 @@ export class UploadController {
         return res.status(400).json({ error: 'No file uploaded.' });
       }
 
-      const fileUrl = UploadController.getPublicFileUrl(req.file);
+      const fileUrl = UploadController.getPublicFileUrl(req, req.file);
 
       res.status(201).json({
         message: 'File uploaded successfully',
@@ -52,7 +55,7 @@ export class UploadController {
       }
 
       const fileDetails = files.map((file) => {
-        const url = UploadController.getPublicFileUrl(file);
+        const url = UploadController.getPublicFileUrl(req, file);
         return {
           url,
           filename: file.filename,

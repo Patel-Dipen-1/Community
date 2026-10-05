@@ -74,8 +74,17 @@ export class ChatController {
   static async sendMessage(req: Request, res: Response) {
     try {
       const senderId = (req as any).user.userId || (req as any).user.id;
-      const conversationId = req.params.id;
-      const { text, productCode, mediaUrl, clientMessageId } = req.body;
+      let conversationId = req.params.id || req.body.conversationId;
+      const { recipientId, recipientUserId, recipientMobileNumber, text, productCode, mediaUrl, clientMessageId } = req.body;
+
+      if (!conversationId) {
+        const targetIdentifier = recipientId || recipientUserId || recipientMobileNumber;
+        if (!targetIdentifier) {
+          return res.status(400).json({ success: false, error: 'conversationId or recipientId is required' });
+        }
+        const convRes = await ChatService.getOrCreateConversation(senderId, targetIdentifier);
+        conversationId = convRes.conversationId;
+      }
 
       const message = await ChatService.sendMessage(senderId, conversationId, { text, productCode, mediaUrl, clientMessageId });
       
@@ -83,9 +92,10 @@ export class ChatController {
       const io = req.app.get('io');
       if (io) {
         io.to(conversationId).emit('receive_message', message);
+        io.emit('message:new', message);
       }
 
-      return res.status(201).json({ success: true, message });
+      return res.status(201).json({ success: true, conversationId, message });
     } catch (err: any) {
       const isRestricted = err.message?.startsWith('RESTRICTED_NOT_APPROVED');
       return res.status(isRestricted ? 403 : 400).json({

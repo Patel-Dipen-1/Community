@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { API_CONFIG } from '../../../lib/api/config';
+import { formatMediaUrl } from '../../../lib/utils/media';
 
 interface RichProductSkuCardProps {
   productCode: string;
@@ -74,7 +75,7 @@ export function RichProductSkuCard({
 
   const primaryImg =
     product?.images && Array.isArray(product.images) && product.images.length > 0
-      ? product.images[0]
+      ? formatMediaUrl(product.images[0])
       : 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=600';
 
   const categoryName =

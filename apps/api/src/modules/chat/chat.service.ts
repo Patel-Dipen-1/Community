@@ -1,9 +1,36 @@
 import { prisma } from '@b2b/database';
 
+function getNormalizedCommunities(business?: { allowedCommunities?: string[] } | null): string[] {
+  if (business?.allowedCommunities && Array.isArray(business.allowedCommunities) && business.allowedCommunities.length > 0) {
+    return business.allowedCommunities.map((c) => c.trim().toLowerCase());
+  }
+  return ['clothing']; // Default fallback trade community if empty or unspecified
+}
+
+function checkCommunityAccess(user1?: any, user2?: any): boolean {
+  if (!user1 || !user2) return false;
+
+  const isUser1Admin =
+    user1.email === 'dnpatel2002@gmail.com' ||
+    user1.business?.assignedRole === 'SUPER_ADMIN' ||
+    user1.assignedRole === 'SUPER_ADMIN';
+  const isUser2Admin =
+    user2.email === 'dnpatel2002@gmail.com' ||
+    user2.business?.assignedRole === 'SUPER_ADMIN' ||
+    user2.assignedRole === 'SUPER_ADMIN';
+
+  if (isUser1Admin || isUser2Admin) return true;
+
+  const comms1 = getNormalizedCommunities(user1.business);
+  const comms2 = getNormalizedCommunities(user2.business);
+
+  return comms1.some((c) => comms2.includes(c));
+}
+
 export class ChatService {
   /**
    * Search for other APPROVED users by mobile number, name, or shop name.
-   * Restricts search strictly to users with status = 'APPROVED' and matching allowedCommunities.
+   * Restricts search strictly to active users and matching allowedCommunities.
    */
   static async searchApprovedUsers(currentUserId: string, search: string) {
     const currentUser = await prisma.user.findUnique({
@@ -11,8 +38,8 @@ export class ChatService {
       include: { business: true },
     });
 
-    if (!currentUser || currentUser.status !== 'APPROVED') {
-      throw new Error('RESTRICTED_NOT_APPROVED: Your account must be APPROVED to search or start chats.');
+    if (!currentUser || currentUser.status === 'BLOCKED' || (currentUser.status as string) === 'BLACK') {
+      throw new Error('USER_BLOCKED: Your account has been blocked by Super Admin.');
     }
 
     if (!search || search.trim().length === 0) {
@@ -20,25 +47,51 @@ export class ChatService {
     }
 
     const cleanQuery = search.trim();
-    const userCommunities: string[] = currentUser.business?.allowedCommunities || ['clothing'];
-    const isSuperAdmin = currentUser.business?.assignedRole === 'SUPER_ADMIN';
+    const userCommunities = getNormalizedCommunities(currentUser.business);
+    const isSuperAdmin =
+      currentUser.email === 'dnpatel2002@gmail.com' ||
+      currentUser.business?.assignedRole === 'SUPER_ADMIN';
 
     const users = await prisma.user.findMany({
       where: {
-        status: 'APPROVED',
-        id: { not: currentUserId },
-        ...(!isSuperAdmin && {
-          business: {
-            allowedCommunities: {
-              hasSome: userCommunities,
-            },
+        AND: [
+          { status: { notIn: ['BLOCKED', 'BLACK'] } },
+          { id: { not: currentUserId } },
+          ...(!isSuperAdmin
+            ? [
+                {
+                  OR: [
+                    {
+                      business: {
+                        allowedCommunities: {
+                          hasSome: userCommunities,
+                        },
+                      },
+                    },
+                    {
+                      business: {
+                        allowedCommunities: {
+                          isEmpty: true,
+                        },
+                      },
+                    },
+                    {
+                      business: {
+                        is: null,
+                      },
+                    },
+                  ],
+                },
+              ]
+            : []),
+          {
+            OR: [
+              { mobileNumber: cleanQuery },
+              { mobileNumber: { contains: cleanQuery, mode: 'insensitive' } },
+              { fullName: { contains: cleanQuery, mode: 'insensitive' } },
+              { business: { shopName: { contains: cleanQuery, mode: 'insensitive' } } },
+            ],
           },
-        }),
-        OR: [
-          { mobileNumber: cleanQuery },
-          { mobileNumber: { contains: cleanQuery } },
-          { fullName: { contains: cleanQuery, mode: 'insensitive' } },
-          { business: { shopName: { contains: cleanQuery, mode: 'insensitive' } } },
         ],
       },
       select: {
@@ -66,12 +119,12 @@ export class ChatService {
       assignedRole: u.business?.assignedRole || 'RETAILER',
       status: u.status,
       isVerified: u.isVerified,
-      allowedCommunities: u.business?.allowedCommunities || [],
+      allowedCommunities: u.business?.allowedCommunities || ['clothing'],
     }));
   }
 
   /**
-   * Get an existing conversation or create a new one between two APPROVED users.
+   * Get an existing conversation or create a new one between two users.
    * Enforces backend status check and community authorization on BOTH sender and recipient.
    */
   static async getOrCreateConversation(senderId: string, targetIdentifier: string) {
@@ -81,8 +134,8 @@ export class ChatService {
       include: { business: true },
     });
 
-    if (!sender || sender.status !== 'APPROVED') {
-      throw new Error(`RESTRICTED_NOT_APPROVED: Your account status is '${sender?.status || 'UNKNOWN'}'. Only APPROVED users can use the chat feature.`);
+    if (!sender || sender.status === 'BLOCKED' || (sender.status as string) === 'BLACK') {
+      throw new Error('USER_BLOCKED: Your account has been blocked by Super Admin.');
     }
 
     // 2. Find Recipient by User ID or Mobile Number
@@ -105,21 +158,16 @@ export class ChatService {
     }
 
     // 3. Verify Recipient Account Status
-    if (recipient.status !== 'APPROVED') {
-      throw new Error(`RESTRICTED_NOT_APPROVED: Target user '${recipient.fullName}' has account status '${recipient.status}'. Messaging is strictly restricted to APPROVED users.`);
+    if (recipient.status === 'BLOCKED' || (recipient.status as string) === 'BLACK') {
+      throw new Error(`USER_BLOCKED: Target user '${recipient.fullName}' is currently blocked by Super Admin.`);
     }
 
     // 4. Verify Community Authorization
-    const senderComms = sender.business?.allowedCommunities || ['clothing'];
-    const recipientComms = recipient.business?.allowedCommunities || ['clothing'];
-    const isSuperAdmin = sender.business?.assignedRole === 'SUPER_ADMIN' || recipient.business?.assignedRole === 'SUPER_ADMIN';
-
-    const hasSharedCommunity = senderComms.some((comm) => recipientComms.includes(comm));
-    if (!hasSharedCommunity && !isSuperAdmin) {
+    if (!checkCommunityAccess(sender, recipient)) {
       throw new Error('COMMUNITY_RESTRICTED: Messaging is restricted to users within your allowed business communities.');
     }
 
-    // 4. Find existing conversation between senderId and recipient.id
+    // 5. Find existing conversation between senderId and recipient.id
     let conversation = await prisma.conversation.findFirst({
       where: {
         OR: [
@@ -137,7 +185,7 @@ export class ChatService {
       },
     });
 
-    // 5. Create new conversation if none exists
+    // 6. Create new conversation if none exists
     if (!conversation) {
       conversation = await prisma.conversation.create({
         data: {
@@ -175,8 +223,8 @@ export class ChatService {
   }
 
   /**
-   * Fetch all conversations for the authenticated APPROVED user.
-   * Restricts list strictly to APPROVED participants with matching allowedCommunities.
+   * Fetch all conversations for the authenticated user.
+   * Restricts list strictly to active participants with matching allowedCommunities.
    */
   static async getUserConversations(userId: string) {
     const currentUser = await prisma.user.findUnique({
@@ -184,8 +232,8 @@ export class ChatService {
       include: { business: true },
     });
 
-    if (!currentUser || currentUser.status !== 'APPROVED') {
-      throw new Error('RESTRICTED_NOT_APPROVED: Your account must be APPROVED to access chat conversations.');
+    if (!currentUser || currentUser.status === 'BLOCKED' || (currentUser.status as string) === 'BLACK') {
+      throw new Error('USER_BLOCKED: Your account has been blocked by Super Admin.');
     }
 
     const conversations = await prisma.conversation.findMany({
@@ -208,16 +256,8 @@ export class ChatService {
 
     return conversations
       .filter((c) => {
-        if (c.user1.status !== 'APPROVED' || c.user2.status !== 'APPROVED') return false;
-        const comms1 = c.user1.business?.allowedCommunities || ['clothing'];
-        const comms2 = c.user2.business?.allowedCommunities || ['clothing'];
-        const isSuperAdmin =
-          c.user1.business?.assignedRole === 'SUPER_ADMIN' ||
-          c.user2.business?.assignedRole === 'SUPER_ADMIN' ||
-          c.user1.email === 'dnpatel2002@gmail.com' ||
-          c.user2.email === 'dnpatel2002@gmail.com';
-
-        return isSuperAdmin || comms1.some((cat) => comms2.includes(cat));
+        if (c.user1.status === 'BLOCKED' || c.user2.status === 'BLOCKED') return false;
+        return checkCommunityAccess(c.user1, c.user2);
       })
       .map((c) => {
         const otherUser = c.user1Id === userId ? c.user2 : c.user1;
@@ -241,15 +281,15 @@ export class ChatService {
 
   /**
    * Get all messages for a specific conversation.
-   * Verifies user membership, APPROVED account status, and allowedCommunities match.
+   * Verifies user membership, account status, and allowedCommunities match.
    */
   static async getConversationMessages(userId: string, conversationId: string, options?: { limit?: number; before?: string }) {
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
     });
 
-    if (!currentUser || currentUser.status !== 'APPROVED') {
-      throw new Error('RESTRICTED_NOT_APPROVED: Your account must be APPROVED to view chat messages.');
+    if (!currentUser || currentUser.status === 'BLOCKED' || (currentUser.status as string) === 'BLACK') {
+      throw new Error('USER_BLOCKED: Your account has been blocked by Super Admin.');
     }
 
     const conversation = await prisma.conversation.findUnique({
@@ -268,22 +308,11 @@ export class ChatService {
       throw new Error('Access denied to this conversation.');
     }
 
-    // Verify both participants are APPROVED
-    if (conversation.user1.status !== 'APPROVED' || conversation.user2.status !== 'APPROVED') {
-      throw new Error('RESTRICTED_NOT_APPROVED: Messaging is disabled because one or both participants are not APPROVED.');
+    if (conversation.user1.status === 'BLOCKED' || conversation.user2.status === 'BLOCKED') {
+      throw new Error('USER_BLOCKED: Messaging is disabled because one or both participants are blocked.');
     }
 
-    // Verify allowedCommunities match
-    const comms1 = conversation.user1.business?.allowedCommunities || ['clothing'];
-    const comms2 = conversation.user2.business?.allowedCommunities || ['clothing'];
-    const isSuperAdmin =
-      conversation.user1.business?.assignedRole === 'SUPER_ADMIN' ||
-      conversation.user2.business?.assignedRole === 'SUPER_ADMIN' ||
-      conversation.user1.email === 'dnpatel2002@gmail.com' ||
-      conversation.user2.email === 'dnpatel2002@gmail.com';
-
-    const hasSharedCommunity = isSuperAdmin || comms1.some((cat) => comms2.includes(cat));
-    if (!hasSharedCommunity) {
+    if (!checkCommunityAccess(conversation.user1, conversation.user2)) {
       throw new Error('COMMUNITY_RESTRICTED: You cannot view messages with vendors from a different trade category.');
     }
 
@@ -375,8 +404,7 @@ export class ChatService {
 
   /**
    * Send a real-time chat message.
-   * Strict backend verification that BOTH sender and recipient have status = 'APPROVED'
-   * and share at least 1 allowed trade category.
+   * Strict backend verification that BOTH sender and recipient share trade category access.
    */
   static async sendMessage(
     senderId: string,
@@ -404,8 +432,8 @@ export class ChatService {
       include: { business: true },
     });
 
-    if (!sender || sender.status !== 'APPROVED') {
-      throw new Error(`RESTRICTED_NOT_APPROVED: Your account status is '${sender?.status || 'UNKNOWN'}'. Only APPROVED users can send messages.`);
+    if (!sender || sender.status === 'BLOCKED' || (sender.status as string) === 'BLACK') {
+      throw new Error('USER_BLOCKED: Your account has been blocked by Super Admin.');
     }
 
     // 2. Fetch Conversation and Participants
@@ -428,20 +456,11 @@ export class ChatService {
     const recipient = conversation.user1Id === senderId ? conversation.user2 : conversation.user1;
 
     // 3. Verify Recipient Status & Allowed Categories
-    if (recipient.status !== 'APPROVED') {
-      throw new Error(`RESTRICTED_NOT_APPROVED: Recipient '${recipient.fullName}' has status '${recipient.status}'. Messaging is permitted only with APPROVED accounts.`);
+    if (recipient.status === 'BLOCKED' || (recipient.status as string) === 'BLACK') {
+      throw new Error(`USER_BLOCKED: Recipient '${recipient.fullName}' is currently blocked.`);
     }
 
-    const senderComms = sender.business?.allowedCommunities || ['clothing'];
-    const recipientComms = recipient.business?.allowedCommunities || ['clothing'];
-    const isSuperAdmin =
-      sender.business?.assignedRole === 'SUPER_ADMIN' ||
-      recipient.business?.assignedRole === 'SUPER_ADMIN' ||
-      sender.email === 'dnpatel2002@gmail.com' ||
-      recipient.email === 'dnpatel2002@gmail.com';
-
-    const hasSharedCommunity = isSuperAdmin || senderComms.some((cat) => recipientComms.map((c) => c.toLowerCase()).includes(cat.toLowerCase()));
-    if (!hasSharedCommunity) {
+    if (!checkCommunityAccess(sender, recipient)) {
       throw new Error('COMMUNITY_RESTRICTED: Direct Chat is permitted only between users who share at least one active trade category. You cannot message users without a matching category.');
     }
 
@@ -454,8 +473,16 @@ export class ChatService {
 
       if (product) {
         const prodCat = (product.community?.slug || 'clothing').toLowerCase();
-        const senderCanSee = isSuperAdmin || senderComms.some((c) => c.toLowerCase() === prodCat);
-        const recipientCanSee = isSuperAdmin || recipientComms.some((c) => c.toLowerCase() === prodCat);
+        const senderComms = getNormalizedCommunities(sender.business);
+        const recipientComms = getNormalizedCommunities(recipient.business);
+        const isSuperAdmin =
+          sender.business?.assignedRole === 'SUPER_ADMIN' ||
+          recipient.business?.assignedRole === 'SUPER_ADMIN' ||
+          sender.email === 'dnpatel2002@gmail.com' ||
+          recipient.email === 'dnpatel2002@gmail.com';
+
+        const senderCanSee = isSuperAdmin || senderComms.includes(prodCat);
+        const recipientCanSee = isSuperAdmin || recipientComms.includes(prodCat);
 
         if (!senderCanSee || !recipientCanSee) {
           throw new Error('COMMUNITY_RESTRICTED: Cannot share content in chat from a category not shared by both participants.');
@@ -517,9 +544,9 @@ export class ChatService {
     const existingIndex = currentReactions.findIndex((r) => r.userId === userId);
     if (existingIndex >= 0) {
       if (currentReactions[existingIndex].emoji === emoji) {
-        currentReactions.splice(existingIndex, 1); // Remove reaction if toggled
+        currentReactions.splice(existingIndex, 1);
       } else {
-        currentReactions[existingIndex].emoji = emoji; // Update reaction
+        currentReactions[existingIndex].emoji = emoji;
       }
     } else {
       currentReactions.push({ userId, emoji });
@@ -632,4 +659,5 @@ export class ChatService {
     return setting;
   }
 }
+
 

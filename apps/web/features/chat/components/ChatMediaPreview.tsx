@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { VoiceWaveformPlayer } from './VoiceWaveformPlayer';
+import { formatMediaUrl } from '../../../lib/utils/media';
 
 interface ChatMediaPreviewProps {
   mediaUrl: string;
@@ -14,7 +15,7 @@ export function ChatMediaPreview({ mediaUrl, senderName }: ChatMediaPreviewProps
 
   if (!mediaUrl) return null;
 
-  const cleanUrl = mediaUrl.trim();
+  const cleanUrl = formatMediaUrl(mediaUrl.trim());
   const lowerUrl = cleanUrl.toLowerCase();
 
   // Determine media category

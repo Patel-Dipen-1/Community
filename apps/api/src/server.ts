@@ -224,8 +224,8 @@ io.on('connection', (socket) => {
         include: { business: true },
       });
 
-      if (!caller || caller.status !== 'APPROVED') {
-        socket.emit('call:error', { message: 'CALL_DENIED: Your account status must be APPROVED to place calls' });
+      if (!caller || caller.status === 'BLOCKED' || (caller.status as string) === 'BLACK') {
+        socket.emit('call:error', { message: 'CALL_DENIED: Your account is restricted or blocked.' });
         return;
       }
 
@@ -235,8 +235,8 @@ io.on('connection', (socket) => {
         include: { business: true },
       });
 
-      if (!target || target.status !== 'APPROVED') {
-        socket.emit('call:error', { message: 'CALL_DENIED: Receiver account is not active or approved' });
+      if (!target || target.status === 'BLOCKED' || (target.status as string) === 'BLACK') {
+        socket.emit('call:error', { message: 'CALL_DENIED: Receiver account is not active or available' });
         return;
       }
 
@@ -408,8 +408,8 @@ io.on('connection', (socket) => {
         select: { status: true },
       });
 
-      if (!user || user.status !== 'APPROVED') {
-        socket.emit('room_join_error', { conversationId, error: 'ROOM_JOIN_DENIED: User status not APPROVED' });
+      if (!user || user.status === 'BLOCKED' || (user.status as string) === 'BLACK') {
+        socket.emit('room_join_error', { conversationId, error: 'ROOM_JOIN_DENIED: User is blocked' });
         return;
       }
 
@@ -484,9 +484,15 @@ io.on('connection', (socket) => {
   });
 
   // Broadcast 1-to-1 Message (With Authorization Check)
-  socket.on('send_message', async (data: { conversationId: string; senderId: string; text?: string; productCode?: string; mediaUrl?: string; clientMessageId?: string }) => {
+  socket.on('send_message', async (data: { conversationId: string; senderId?: string; text?: string; productCode?: string; mediaUrl?: string; clientMessageId?: string }) => {
     const socketUserId = socket.data.userId;
-    if (!socketUserId || socketUserId !== data.senderId) {
+    if (!socketUserId) {
+      socket.emit('error', { message: 'UNAUTHORIZED_SENDER: Socket user identity mismatch' });
+      return;
+    }
+
+    const senderId = data.senderId || socketUserId;
+    if (senderId !== socketUserId) {
       socket.emit('error', { message: 'UNAUTHORIZED_SENDER: Socket user identity mismatch' });
       return;
     }
@@ -505,7 +511,7 @@ io.on('connection', (socket) => {
       io.to(data.conversationId).emit('receive_message', {
         id: `msg-${Date.now()}`,
         conversationId: data.conversationId,
-        senderId: data.senderId,
+        senderId,
         clientMessageId: data.clientMessageId,
         text: data.text,
         productCode: data.productCode,

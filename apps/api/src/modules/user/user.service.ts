@@ -208,7 +208,14 @@ export class UserService {
           ...(rawDigits.length >= 10 ? [{ mobileNumber: rawDigits }] : []),
         ],
       },
-      include: {
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        mobileNumber: true,
+        passwordHash: true,
+        isVerified: true,
+        status: true,
         business: true,
       },
     });

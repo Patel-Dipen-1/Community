@@ -93,7 +93,7 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
       {activeTab === 'direct' ? (
         <FlatList
           data={convData?.conversations || []}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => item?.conversationId || (item as any)?.id || `conv-${index}`}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#818cf8" />
           }
@@ -111,25 +111,30 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
             )
           }
           renderItem={({ item }) => {
-            const other = item.otherUser;
-            const lastMsg = item.lastMessage;
+            const participant = (item as any)?.participant || item?.otherUser || (item as any)?.user2 || (item as any)?.user1 || {};
+            const lastMsg = item?.lastMessage;
+            const convId = item?.conversationId || (item as any)?.id || '';
+            const recipientId = participant?.userId || participant?.id || '';
+            const recipientName = participant?.shopName || participant?.fullName || participant?.business?.shopName || 'Business Contact';
+            const recipientAvatar = participant?.avatar;
+
             return (
               <TouchableOpacity
                 style={styles.chatCard}
                 activeOpacity={0.8}
                 onPress={() =>
                   navigation.navigate('ChatDetail', {
-                    conversationId: item.id,
-                    recipientId: other.id,
-                    recipientName: other.business?.shopName || other.fullName,
-                    recipientAvatar: other.avatar,
+                    conversationId: convId,
+                    recipientId,
+                    recipientName,
+                    recipientAvatar,
                   })
                 }
               >
                 <View style={styles.avatarContainer}>
                   <Image
                     source={{
-                      uri: other.avatar || 'https://via.placeholder.com/100?text=Shop',
+                      uri: recipientAvatar || 'https://via.placeholder.com/100?text=Shop',
                     }}
                     style={styles.avatar}
                   />
@@ -139,7 +144,7 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
                 <View style={styles.chatDetails}>
                   <View style={styles.chatHeaderRow}>
                     <Text style={styles.shopTitle} numberOfLines={1}>
-                      {other.business?.shopName || other.fullName}
+                      {recipientName}
                     </Text>
 
                     <Text style={styles.timeText}>
@@ -148,7 +153,7 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
                   </View>
 
                   <Text style={styles.cityText}>
-                    {other.business?.city ? `📍 ${other.business.city}` : 'Verified Business Contact'}
+                    {participant?.city || participant?.business?.city ? `📍 ${participant?.city || participant?.business?.city}` : 'Verified Business Contact'}
                   </Text>
 
                   <Text style={styles.snippetText} numberOfLines={1}>
@@ -168,7 +173,7 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
       ) : (
         <FlatList
           data={groupData?.groups || []}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => item?.id || `group-${index}`}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#818cf8" />
           }

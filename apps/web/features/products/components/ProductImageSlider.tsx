@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { formatMediaUrl } from '../../../lib/utils/media';
 
 interface ProductImageSliderProps {
   images: string[];
@@ -10,7 +11,7 @@ interface ProductImageSliderProps {
 
 export function ProductImageSlider({ images, title, skuCode }: ProductImageSliderProps) {
   const imageList = Array.isArray(images) && images.length > 0
-    ? images
+    ? images.map((img) => formatMediaUrl(img))
     : ['https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=600'];
 
   const [activeIndex, setActiveIndex] = useState(0);
