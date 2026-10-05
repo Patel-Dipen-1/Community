@@ -15,8 +15,10 @@ export function formatMediaUrl(url?: string | null): string {
   }
 
   // Active API Host configuration
-  const envApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
-  const apiBase = envApiUrl.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
+  let apiBase = 'https://communityapi.radheytechsolutions.com';
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    apiBase = process.env.NEXT_PUBLIC_API_URL.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
+  }
 
   // Handle uploaded static files
   if (cleanUrl.includes('/uploads/')) {

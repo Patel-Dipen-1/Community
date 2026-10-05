@@ -12,11 +12,10 @@ const getApiBaseUrl = (): string => {
   }
 
   if (typeof window !== 'undefined' && window.location) {
-    const { protocol, hostname, port } = window.location;
-    if (!port || port === '80' || port === '443') {
-      return `${protocol}//${hostname}/api/v1`;
+    const { hostname } = window.location;
+    if (hostname.includes('radheytechsolutions.com') || hostname !== 'localhost') {
+      return 'https://communityapi.radheytechsolutions.com/api/v1';
     }
-    return `${protocol}//${hostname}:5000/api/v1`;
   }
 
   return 'http://localhost:5000/api/v1';
