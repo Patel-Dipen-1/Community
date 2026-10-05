@@ -234,13 +234,10 @@ export async function seedDynamicSystem() {
   console.log('✅ Dynamic System Seed completed successfully!');
 }
 
-if (require.main === module) {
-  seedDynamicSystem()
-    .catch((e) => {
-      console.error('Seed error:', e);
-      process.exit(1);
-    })
-    .finally(async () => {
-      await prisma.$disconnect();
-    });
-}
+seedDynamicSystem()
+  .catch((e) => {
+    console.error('Seed error:', e);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
