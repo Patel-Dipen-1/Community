@@ -112,6 +112,18 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
   // Selected Product Detail Modal
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
 
+  // Edit Product Modal state
+  const [editingProduct, setEditingProduct] = useState<any | null>(null);
+
+  const handleEditProduct = (product: any) => {
+    setEditingProduct(product);
+  };
+
+  const handleCloseProductModal = () => {
+    setAddProductModalOpen(false);
+    setEditingProduct(null);
+  };
+
   const store = (storeData as any)?.store;
   const biz = (storeData as any)?.business || store?.business || user?.business;
   const products: any[] = (storeData as any)?.products || store?.products || [];
@@ -454,12 +466,23 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
                       <Text style={styles.detailsBtnText}>Details 👁️</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={styles.deleteBtn}
-                      onPress={() => handleDeleteProduct(p.id, p.title)}
-                    >
-                      <Text style={styles.deleteBtnText}>🗑️</Text>
-                    </TouchableOpacity>
+                    {!isViewingOtherStore && (
+                      <TouchableOpacity
+                        style={styles.editProductBtn}
+                        onPress={() => handleEditProduct(p)}
+                      >
+                        <Text style={styles.editProductBtnText}>✏️ Edit</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {!isViewingOtherStore && (
+                      <TouchableOpacity
+                        style={styles.deleteBtn}
+                        onPress={() => handleDeleteProduct(p.id, p.title)}
+                      >
+                        <Text style={styles.deleteBtnText}>🗑️</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
               );
@@ -525,11 +548,12 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
       </Modal>
 
       {/* ============================================================ */}
-      {/* MODAL 2: ADD CLOTHING PRODUCT (FULL WEB PARITY) */}
+      {/* MODAL 2: ADD / EDIT CLOTHING PRODUCT (FULL WEB PARITY) */}
       {/* ============================================================ */}
       <ClothingProductCreateModal
-        isOpen={addProductModalOpen}
-        onClose={() => setAddProductModalOpen(false)}
+        isOpen={addProductModalOpen || Boolean(editingProduct)}
+        initialProduct={editingProduct}
+        onClose={handleCloseProductModal}
         onSuccess={() => refetchMyStore()}
       />
 
@@ -560,7 +584,20 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
               <Text style={styles.detailMoq}>Minimum Order Quantity (MOQ): {selectedProduct.moq || 10} units</Text>
               <Text style={styles.detailDesc}>{selectedProduct.description || 'No description provided.'}</Text>
 
-              <Button title="Close" variant="secondary" onPress={() => setSelectedProduct(null)} style={{ marginTop: 14 }} />
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                {!isViewingOtherStore && (
+                  <Button
+                    title="✏️ Edit Product"
+                    style={{ flex: 1 }}
+                    onPress={() => {
+                      const prodToEdit = selectedProduct;
+                      setSelectedProduct(null);
+                      handleEditProduct(prodToEdit);
+                    }}
+                  />
+                )}
+                <Button title="Close" variant="secondary" onPress={() => setSelectedProduct(null)} style={{ flex: 1 }} />
+              </View>
             </View>
           </View>
         </Modal>
@@ -776,6 +813,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   detailsBtnText: { color: '#f8fafc', fontSize: 11, fontWeight: '700' },
+  editProductBtn: {
+    height: 32,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(99, 102, 241, 0.4)',
+  },
+  editProductBtnText: { color: '#818cf8', fontSize: 11, fontWeight: '700' },
   deleteBtn: {
     width: 32,
     height: 32,

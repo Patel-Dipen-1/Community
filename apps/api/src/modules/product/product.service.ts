@@ -412,6 +412,32 @@ export class ProductService {
     const defaultSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size'];
     const defaultPatterns = ['Plain Solid', 'Digital Printed', 'Heavy Embroidery', 'Zari Work', 'Hand Block Printed', 'Chikan Work'];
 
+    // Hardware Options
+    const defaultHardwareCategories = ['Power Tools', 'Hand Tools', 'Fasteners & Bolts', 'Plumbing & Pipes', 'Paints & Chemicals', 'Safety Equipment', 'Machine Parts'];
+    const defaultHardwareMaterials = ['Stainless Steel 304', 'High Carbon Steel', 'Brass', 'Cast Iron', 'Heavy Duty Alloy', 'Chrome Vanadium', 'PVC / Polymer'];
+    const defaultHardwareWarranties = ['No Warranty', '6 Months Brand Warranty', '1 Year Manufacturer Warranty', '2 Years Replacement Guarantee', 'Lifetime Guarantee'];
+    const defaultHardwarePowerRatings = ['Manual / Non-Powered', '220V AC Heavy Duty', '12V Cordless Battery', '18V Brushless Lithium', '440V 3-Phase Industrial'];
+    const defaultHardwareFinishes = ['Rust-Proof Zinc Coated', 'Chrome Plated', 'Matte Black Powder Coated', 'Anodized Aluminum', 'Polished Mirror Finish'];
+    const defaultHardwareApplications = ['Heavy Construction', 'Workshop & Fabrication', 'Automobile Repair', 'Home DIY & Repairs', 'Electrical Installation'];
+
+    // Jewellery Options
+    const defaultJewelleryCategories = ['Gold Jewellery', 'Diamond Jewellery', '1 Gram Gold / Imitation', 'Sterling Silver 925', 'Gemstones & Pearls', 'Bridal Sets'];
+    const defaultJewelleryPurities = ['24K Pure Gold (999)', '22K BIS Hallmarked (916)', '18K Diamond Gold (750)', '14K Gold', '1 Gram Micro Plated', '925 Sterling Silver'];
+    const defaultJewelleryGemstones = ['Uncut Polki Diamond', 'Real Solitaire Diamond', 'Certified Emerald', 'Cubic Zirconia (CZ)', 'Fresh Water Pearl', 'Synthetic Ruby'];
+    const defaultJewelleryCertifications = ['BIS Hallmarked', 'IGI Certified Diamond', 'GIA Certified Solitaire', 'SGL Certified', 'Non-Certified Commercial'];
+
+    // Electronics Options
+    const defaultElectronicsCategories = ['Smartphones & Accessories', 'Audio & Speakers', 'Cables & Chargers', 'Home Appliances', 'Circuit Boards & Sensors', 'LED Lighting'];
+    const defaultElectronicsPowerSources = ['Battery Operated', '220V Mains Power', 'USB-C 5V', 'Solar Powered', '12V DC Input'];
+    const defaultElectronicsConnectivities = ['Bluetooth 5.3', 'Wi-Fi 6', 'Wired USB-C', 'RF Remote Control', 'Zigbee / Smart Home'];
+    const defaultElectronicsWarranties = ['6 Months Repair', '1 Year Brand Warranty', '2 Years Extended Warranty'];
+
+    // Grocery Options
+    const defaultGroceryCategories = ['Spices & Masala', 'Grains & Pulses', 'Edible Oils', 'Dry Fruits & Nuts', 'Packaged Snacks', 'Organic Staples'];
+    const defaultGroceryPackagings = ['Standard Pouch', 'Vacuum Sealed Pack', 'Tin Can', 'Jute Sack', 'Glass Jar', 'Plastic Container'];
+    const defaultGroceryShelfLives = ['3 Months', '6 Months', '12 Months', '24 Months'];
+    const defaultGroceryCertifications = ['FSSAI Licensed & Certified', '100% Organic Certified', 'ISO Standard', 'Non-GMO Certified'];
+
     const customCategories = approvedRequests.filter((r) => r.type === 'CATEGORY').map((r) => r.value);
     const customFabrics = approvedRequests.filter((r) => r.type === 'FABRIC').map((r) => r.value);
     const customGenders = approvedRequests.filter((r) => r.type === 'GENDER').map((r) => r.value);
@@ -430,12 +456,31 @@ export class ProductService {
 
     return {
       categories,
+      clothingCategories: categories,
+      hardwareCategories: defaultHardwareCategories,
+      jewelleryCategories: defaultJewelleryCategories,
+      electronicsCategories: defaultElectronicsCategories,
+      groceryCategories: defaultGroceryCategories,
       fabrics,
       genders,
       fitTypes,
       seasons,
       sizes,
       patterns,
+      hardwareMaterials: defaultHardwareMaterials,
+      hardwareWarranties: defaultHardwareWarranties,
+      hardwarePowerRatings: defaultHardwarePowerRatings,
+      hardwareFinishes: defaultHardwareFinishes,
+      hardwareApplications: defaultHardwareApplications,
+      jewelleryPurities: defaultJewelleryPurities,
+      jewelleryGemstones: defaultJewelleryGemstones,
+      jewelleryCertifications: defaultJewelleryCertifications,
+      electronicsPowerSources: defaultElectronicsPowerSources,
+      electronicsConnectivities: defaultElectronicsConnectivities,
+      electronicsWarranties: defaultElectronicsWarranties,
+      groceryPackagings: defaultGroceryPackagings,
+      groceryShelfLives: defaultGroceryShelfLives,
+      groceryCertifications: defaultGroceryCertifications,
     };
   }
 

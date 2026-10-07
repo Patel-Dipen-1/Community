@@ -6,6 +6,7 @@ import {
   useGetSystemHealthMetricsQuery,
   useGetLiveSessionsQuery,
 } from '../../../lib/redux/api/adminApi';
+import { useGetCategoryRequestsQuery } from '../../../lib/redux/api/productsApi';
 
 interface AdminDashboardOverviewProps {
   onSelectTab?: (tab: string) => void;
@@ -15,6 +16,9 @@ export function AdminDashboardOverview({ onSelectTab }: AdminDashboardOverviewPr
   const { data: statsRes, isLoading: statsLoading, refetch: refetchStats } = useGetRealTimeDashboardStatsQuery();
   const { data: healthRes, isLoading: healthLoading } = useGetSystemHealthMetricsQuery();
   const { data: sessionsRes } = useGetLiveSessionsQuery();
+  const { data: categoryRequests } = useGetCategoryRequestsQuery({ status: 'PENDING' });
+
+  const pendingRequestsCount = categoryRequests?.length || 0;
 
   const [showOnlineModal, setShowOnlineModal] = useState(false);
 
@@ -61,6 +65,34 @@ export function AdminDashboardOverview({ onSelectTab }: AdminDashboardOverviewPr
           </button>
         </div>
       </div>
+
+      {/* PENDING CATEGORY & ATTRIBUTE REQUESTS ALERT BANNER */}
+      {pendingRequestsCount > 0 && (
+        <div className="bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-500/20 border border-amber-500/40 p-4 rounded-2xl flex items-center justify-between flex-wrap gap-3 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl font-bold border border-amber-500/30">
+              🏷️
+            </div>
+            <div>
+              <h4 className="font-extrabold text-amber-300 text-sm flex items-center gap-2">
+                <span>{pendingRequestsCount} Category & Attribute Request(s) Pending Review!</span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
+                  ACTION REQUIRED
+                </span>
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Sellers submitted requests for new custom Categories, Fabrics, Fits, Seasons, or Sizes during product listing.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => onSelectTab && onSelectTab('CATEGORY_REQUESTS')}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-md transition flex items-center gap-1.5"
+          >
+            Review & Approve Requests ➔
+          </button>
+        </div>
+      )}
 
       {/* 1. USERS telemetry */}
       <div>

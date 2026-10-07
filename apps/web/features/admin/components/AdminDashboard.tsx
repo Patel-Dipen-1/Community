@@ -26,6 +26,7 @@ import {
 import { AdminSubscriptionPanel } from '../../subscription/components/AdminSubscriptionPanel';
 import { AdminPaymentPanel } from '../../subscription/components/AdminPaymentPanel';
 import { AdminCategoryRequestsPanel } from './AdminCategoryRequestsPanel';
+import { useGetCategoryRequestsQuery } from '../../../lib/redux/api/productsApi';
 import { CategoryManagementModule } from '../categories/CategoryManagementModule';
 import { AdminSystemSettingsPanel } from './AdminSystemSettingsPanel';
 import { AdminDashboardOverview } from './AdminDashboardOverview';
@@ -169,6 +170,8 @@ export function AdminDashboard() {
   const { data: deletionsData, isLoading: isDeletionsLoading, refetch: refetchDeletions } = useGetDeletionRequestsQuery(undefined, { skip: !isSuperAdmin });
   const { data: groupsData, refetch: refetchGroups } = useGetGroupsQuery(undefined, { skip: !isSuperAdmin });
   const { data: globalCapData, refetch: refetchGlobalCap } = useGetGlobalGroupCapacityQuery(undefined, { skip: !isSuperAdmin });
+  const { data: categoryRequestsData } = useGetCategoryRequestsQuery({ status: 'PENDING' }, { skip: !isSuperAdmin });
+  const pendingRequestsCount = categoryRequestsData?.length || 0;
   const [updateGroupCapacity] = useUpdateGroupCapacityMutation();
   const [updateGlobalCapacity, { isLoading: isSavingGlobalCap }] = useUpdateGlobalGroupCapacityMutation();
 
@@ -549,6 +552,20 @@ export function AdminDashboard() {
               </button>
 
               <button
+                onClick={() => setActiveTab('CATEGORY_REQUESTS')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
+                  activeTab === 'CATEGORY_REQUESTS' ? 'bg-amber-600 text-white shadow-md' : 'text-amber-400 hover:text-white'
+                }`}
+              >
+                <span>🏷️ Category Requests</span>
+                {pendingRequestsCount > 0 && (
+                  <span className="bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-black">
+                    {pendingRequestsCount}
+                  </span>
+                )}
+              </button>
+
+              <button
                 onClick={() => setActiveTab('SYSTEM_SETTINGS')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                   activeTab === 'SYSTEM_SETTINGS' ? 'bg-purple-600 text-white shadow-md' : 'text-purple-300 hover:text-white'
@@ -673,6 +690,17 @@ export function AdminDashboard() {
             >
               <span>✨ Trade Categories (CRUD)</span>
               <span className="bg-slate-950/40 px-2 py-0.5 rounded-full text-[10px] font-bold">DYNAMIC</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('CATEGORY_REQUESTS');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-semibold flex justify-between items-center ${activeTab === 'CATEGORY_REQUESTS' ? 'bg-amber-600 text-white' : 'text-amber-400 hover:bg-slate-800'
+                }`}
+            >
+              <span>🏷️ Custom Category Requests</span>
+              <span className="bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full text-[10px] font-black">{pendingRequestsCount}</span>
             </button>
             <button
               onClick={() => {

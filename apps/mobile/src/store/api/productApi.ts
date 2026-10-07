@@ -83,12 +83,31 @@ export const productApi = baseApi.injectEndpoints({
 
     getGlobalOptions: builder.query<{
       categories: string[];
+      clothingCategories?: string[];
+      hardwareCategories?: string[];
+      jewelleryCategories?: string[];
+      electronicsCategories?: string[];
+      groceryCategories?: string[];
       fabrics: string[];
-      sizes: string[];
       genders: string[];
       fitTypes: string[];
       seasons: string[];
+      sizes: string[];
       patterns: string[];
+      hardwareMaterials?: string[];
+      hardwareWarranties?: string[];
+      hardwarePowerRatings?: string[];
+      hardwareFinishes?: string[];
+      hardwareApplications?: string[];
+      jewelleryPurities?: string[];
+      jewelleryGemstones?: string[];
+      jewelleryCertifications?: string[];
+      electronicsPowerSources?: string[];
+      electronicsConnectivities?: string[];
+      electronicsWarranties?: string[];
+      groceryPackagings?: string[];
+      groceryShelfLives?: string[];
+      groceryCertifications?: string[];
     }, void>({
       query: () => '/products/options',
       providesTags: ['Products'],
