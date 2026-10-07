@@ -167,5 +167,52 @@ export class ProductController {
       res.status(400).json({ error: error.message });
     }
   }
+
+  // SUPER ADMIN: DELETE REQUEST / OPTION
+  static async deleteCategoryRequest(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const deleted = await ProductService.deleteCategoryAttributeRequest(id);
+      clearCacheByPattern('/products');
+      res.json({
+        message: 'Category/Attribute option deleted by Super Admin',
+        request: deleted,
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  // SUPER ADMIN: CREATE NEW OPTION DIRECTLY
+  static async createAdminCategoryOption(req: Request, res: Response) {
+    try {
+      const { type, value, description } = req.body;
+      const userId = (req as any).user.id;
+      const option = await ProductService.createAdminCategoryAttributeOption(userId, type, value, description);
+      clearCacheByPattern('/products');
+      res.status(201).json({
+        message: `Option '${value}' added globally!`,
+        option,
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  // SUPER ADMIN: UPDATE EXISTING OPTION VALUE
+  static async updateCategoryOption(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { value } = req.body;
+      const updated = await ProductService.updateCategoryAttributeOption(id, value);
+      clearCacheByPattern('/products');
+      res.json({
+        message: 'Category/Attribute option updated!',
+        option: updated,
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
 }
 

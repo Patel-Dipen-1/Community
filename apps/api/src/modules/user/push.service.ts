@@ -1,15 +1,46 @@
 import { prisma } from '@b2b/database';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
+import path from 'path';
+import fs from 'fs';
+
+let isFirebaseInitialized = false;
+
+function initFirebaseAdmin() {
+  if (isFirebaseInitialized || getApps().length > 0) return;
+
+  try {
+    const serviceAccountPath = path.join(__dirname, '../../config/firebase-service-account.json');
+    if (fs.existsSync(serviceAccountPath)) {
+      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+      initializeApp({
+        credential: cert(serviceAccount),
+      });
+      isFirebaseInitialized = true;
+      console.log('🔥 Firebase Admin SDK initialized successfully for project:', serviceAccount.project_id);
+    }
+  } catch (err) {
+    console.error('⚠️ Failed to initialize Firebase Admin SDK:', err);
+  }
+}
+
+// Initialise Firebase Admin on module load
+initFirebaseAdmin();
 
 export class PushNotificationService {
   /**
-   * Check if Push Notifications are globally enabled by Super Admin
+   * Check if Push Notifications are globally enabled by Super Admin or Firebase Credentials exist
    */
   static async isGloballyEnabled() {
+    initFirebaseAdmin();
     const setting = await prisma.systemSetting.findUnique({ where: { id: 'default' } });
+    const hasServiceAccount = isFirebaseInitialized || getApps().length > 0;
+
     return {
-      enabled: setting?.pushNotificationsEnabled ?? false,
-      hasKey: Boolean(setting?.fcmServerKey && setting.fcmServerKey.trim().length > 0),
-      fcmServerKey: setting?.fcmServerKey || null,
+      enabled: setting?.pushNotificationsEnabled ?? true,
+      hasKey: hasServiceAccount || Boolean(setting?.fcmServerKey && setting.fcmServerKey.trim().length > 0),
+      fcmServerKey: setting?.fcmServerKey || (hasServiceAccount ? 'FIREBASE_SERVICE_ACCOUNT_ACTIVE' : null),
+      serviceAccountActive: hasServiceAccount,
     };
   }
 
@@ -32,7 +63,7 @@ export class PushNotificationService {
 
     return {
       pushNotificationsEnabled: updated.pushNotificationsEnabled,
-      hasKey: Boolean(updated.fcmServerKey),
+      hasKey: Boolean(updated.fcmServerKey || isFirebaseInitialized),
       message: `Mobile Push Notifications are now ${enabled ? 'ENABLED' : 'DISABLED'} by Super Admin.`,
     };
   }
@@ -62,16 +93,17 @@ export class PushNotificationService {
   }
 
   /**
-   * Dispatch Mobile Background Push Notification to User Devices via FCM v1 HTTP API
+   * Dispatch Mobile Background Push Notification to User Devices via FCM Admin SDK
    */
   static async sendPushToUser(
     targetUserId: string,
     notification: { title: string; body: string; data?: Record<string, string> }
   ) {
+    initFirebaseAdmin();
+
     const config = await PushNotificationService.isGloballyEnabled();
-    if (!config.enabled || !config.hasKey || !config.fcmServerKey) {
-      // Push notifications disabled by Super Admin or FCM server key missing
-      return { sent: 0, reason: 'PUSH_DISABLED_OR_NO_KEY' };
+    if (!config.enabled) {
+      return { sent: 0, reason: 'PUSH_DISABLED_BY_ADMIN' };
     }
 
     const tokens = await prisma.userPushToken.findMany({
@@ -83,32 +115,56 @@ export class PushNotificationService {
       return { sent: 0, reason: 'NO_DEVICE_TOKENS' };
     }
 
-    let successCount = 0;
-    for (const t of tokens) {
+    const tokenStrings = tokens.map((t) => t.token);
+
+    // Primary: Send via Firebase Admin SDK
+    if (getApps().length > 0) {
       try {
-        const response = await fetch('https://fcm.googleapis.com/fcm/send', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `key=${config.fcmServerKey}`,
+        const response = await getMessaging().sendEachForMulticast({
+          tokens: tokenStrings,
+          notification: {
+            title: notification.title,
+            body: notification.body,
           },
-          body: JSON.stringify({
-            to: t.token,
-            notification: {
-              title: notification.title,
-              body: notification.body,
-            },
-            data: notification.data || {},
-            priority: 'high',
-          }),
+          data: notification.data || {},
         });
 
-        if (response.ok) successCount++;
-      } catch (err) {
-        // Ignore single device delivery errors
+        return { sent: response.successCount, totalTokens: tokens.length, failures: response.failureCount };
+      } catch (err: any) {
+        console.error('FCM Multicast delivery error:', err);
       }
     }
 
-    return { sent: successCount, totalTokens: tokens.length };
+    // Fallback Legacy HTTP send if server key provided in DB
+    if (config.fcmServerKey && config.fcmServerKey !== 'FIREBASE_SERVICE_ACCOUNT_ACTIVE') {
+      let successCount = 0;
+      for (const t of tokens) {
+        try {
+          const response = await fetch('https://fcm.googleapis.com/fcm/send', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `key=${config.fcmServerKey}`,
+            },
+            body: JSON.stringify({
+              to: t.token,
+              notification: {
+                title: notification.title,
+                body: notification.body,
+              },
+              data: notification.data || {},
+              priority: 'high',
+            }),
+          });
+
+          if (response.ok) successCount++;
+        } catch {
+          // Ignore individual token failure
+        }
+      }
+      return { sent: successCount, totalTokens: tokens.length };
+    }
+
+    return { sent: 0, reason: 'FCM_CREDENTIALS_NOT_FOUND' };
   }
 }

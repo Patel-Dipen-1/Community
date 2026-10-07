@@ -32,9 +32,10 @@ logs/
 .turbo/
 apps/api/uploads/*
 !apps/api/uploads/.gitkeep
-
+apps/api/src/config/firebase-service-account.json
 # Archives
 *.zip
 
 # Agent configuration
 .agents/
+

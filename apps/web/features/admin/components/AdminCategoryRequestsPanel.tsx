@@ -5,6 +5,9 @@ import {
   useGetCategoryRequestsQuery,
   useApproveCategoryRequestMutation,
   useRejectCategoryRequestMutation,
+  useDeleteCategoryRequestMutation,
+  useCreateAdminCategoryOptionMutation,
+  useUpdateCategoryOptionMutation,
   CategoryRequestData,
 } from '../../../lib/redux/api/productsApi';
 
@@ -19,6 +22,9 @@ export function AdminCategoryRequestsPanel() {
 
   const [approveRequest, { isLoading: isApproving }] = useApproveCategoryRequestMutation();
   const [rejectRequest, { isLoading: isRejecting }] = useRejectCategoryRequestMutation();
+  const [deleteRequest, { isLoading: isDeleting }] = useDeleteCategoryRequestMutation();
+  const [createOption, { isLoading: isCreatingOption }] = useCreateAdminCategoryOptionMutation();
+  const [updateOption, { isLoading: isUpdatingOption }] = useUpdateCategoryOptionMutation();
 
   const handleApprove = async (id: string, value: string, type: string) => {
     try {
@@ -43,6 +49,56 @@ export function AdminCategoryRequestsPanel() {
       setTimeout(() => setMsg(null), 4000);
     } catch (err: any) {
       setMsg(`❌ ${err?.data?.error || err?.message || 'Failed to reject request'}`);
+      setTimeout(() => setMsg(null), 4000);
+    }
+  };
+
+  const handleDelete = async (id: string, val: string) => {
+    if (!confirm(`Are you sure you want to delete '${val}'? This will remove it from the global attributes list.`)) return;
+
+    try {
+      await deleteRequest(id).unwrap();
+      setMsg(`🗑️ Option '${val}' deleted.`);
+      refetch();
+      setTimeout(() => setMsg(null), 4000);
+    } catch (err: any) {
+      setMsg(`❌ ${err?.data?.error || err?.message || 'Failed to delete request'}`);
+      setTimeout(() => setMsg(null), 4000);
+    }
+  };
+
+  const handleCreateOption = async () => {
+    const type = prompt(
+      'Select Attribute Type (e.g. JEWELLERY_PURITY, HARDWARE_MATERIAL, FABRIC, SIZE, GENDER, FIT, SEASON, CATEGORY):',
+      'JEWELLERY_PURITY'
+    );
+    if (!type) return;
+
+    const value = prompt(`Enter new value for ${type.toUpperCase()} (e.g. 24K Pure Gold (999)):`);
+    if (!value?.trim()) return;
+
+    try {
+      await createOption({ type: type.trim().toUpperCase(), value: value.trim() }).unwrap();
+      setMsg(`🎉 Created '${value.trim()}' (${type.toUpperCase()}) globally!`);
+      refetch();
+      setTimeout(() => setMsg(null), 4000);
+    } catch (err: any) {
+      setMsg(`❌ ${err?.data?.error || err?.message || 'Failed to create option'}`);
+      setTimeout(() => setMsg(null), 4000);
+    }
+  };
+
+  const handleEditOption = async (id: string, currentValue: string) => {
+    const newValue = prompt(`Edit value for attribute option:`, currentValue);
+    if (!newValue?.trim() || newValue.trim() === currentValue) return;
+
+    try {
+      await updateOption({ id, value: newValue.trim() }).unwrap();
+      setMsg(`✏️ Updated '${currentValue}' ➔ '${newValue.trim()}' globally!`);
+      refetch();
+      setTimeout(() => setMsg(null), 4000);
+    } catch (err: any) {
+      setMsg(`❌ ${err?.data?.error || err?.message || 'Failed to edit option'}`);
       setTimeout(() => setMsg(null), 4000);
     }
   };
@@ -170,13 +226,22 @@ export function AdminCategoryRequestsPanel() {
             </p>
           </div>
 
-          <input
-            type="text"
-            placeholder="Search request value, user, or mobile..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-xs w-64"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search request value, user, or mobile..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2 text-xs w-64"
+            />
+            <button
+              onClick={handleCreateOption}
+              disabled={isCreatingOption}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs shadow-md transition flex items-center gap-1.5"
+            >
+              <span>➕ Add New Option</span>
+            </button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -215,9 +280,9 @@ export function AdminCategoryRequestsPanel() {
                       )}
                     </td>
                     <td className="py-3.5 px-3">
-                      <div className="font-bold text-white">{r.user?.fullName || 'User'}</div>
+                      <div className="font-bold text-white">{r.user?.fullName || 'Super Admin / System'}</div>
                       <div className="text-[11px] text-emerald-400 font-mono font-semibold">
-                        📱 {r.user?.mobileNumber || 'N/A'} {r.user?.business?.shopName ? `• ${r.user.business.shopName}` : ''}
+                        📱 {r.user?.mobileNumber || 'System Global'} {r.user?.business?.shopName ? `• ${r.user.business.shopName}` : ''}
                       </div>
                     </td>
                     <td className="py-3.5 px-3 text-slate-400 text-[11px]">
@@ -252,18 +317,30 @@ export function AdminCategoryRequestsPanel() {
                           <button
                             disabled={isRejecting}
                             onClick={() => handleReject(r.id)}
-                            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow transition"
+                            className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow transition"
                           >
                             ✕ Reject
                           </button>
                         </>
                       )}
 
-                      {r.status === 'APPROVED' && (
-                        <span className="text-[11px] text-emerald-400 font-bold">
-                          ✓ Available Globally
-                        </span>
-                      )}
+                      <button
+                        disabled={isUpdatingOption}
+                        onClick={() => handleEditOption(r.id, r.value)}
+                        className="px-2.5 py-1.5 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold transition"
+                        title="Edit option text"
+                      >
+                        ✏️ Edit
+                      </button>
+
+                      <button
+                        disabled={isDeleting}
+                        onClick={() => handleDelete(r.id, r.value)}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-600/80 hover:bg-rose-600 text-white text-xs font-bold transition"
+                        title="Delete option permanently"
+                      >
+                        🗑️ Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

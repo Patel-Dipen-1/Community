@@ -121,6 +121,32 @@ export const productsApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ['Products'],
     }),
+
+    deleteCategoryRequest: builder.mutation<{ message: string }, string>({
+      query: (id) => ({
+        url: `/products/admin/category-requests/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Products'],
+    }),
+
+    createAdminCategoryOption: builder.mutation<{ message: string; option: any }, { type: string; value: string; description?: string }>({
+      query: (body) => ({
+        url: '/products/admin/category-requests/create',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Products'],
+    }),
+
+    updateCategoryOption: builder.mutation<{ message: string; option: any }, { id: string; value: string }>({
+      query: ({ id, value }) => ({
+        url: `/products/admin/category-requests/${id}`,
+        method: 'PUT',
+        body: { value },
+      }),
+      invalidatesTags: ['Products'],
+    }),
   }),
 });
 
@@ -135,4 +161,7 @@ export const {
   useGetCategoryRequestsQuery,
   useApproveCategoryRequestMutation,
   useRejectCategoryRequestMutation,
+  useDeleteCategoryRequestMutation,
+  useCreateAdminCategoryOptionMutation,
+  useUpdateCategoryOptionMutation,
 } = productsApi;

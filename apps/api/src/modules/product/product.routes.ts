@@ -13,8 +13,11 @@ router.post('/category-requests', authenticateToken, ProductController.submitCat
 
 // SUPER ADMIN CATEGORY & ATTRIBUTE REQUEST MANAGEMENT
 router.get('/admin/category-requests', authenticateToken, ProductController.getCategoryRequests);
+router.post('/admin/category-requests/create', authenticateToken, ProductController.createAdminCategoryOption);
 router.put('/admin/category-requests/:id/approve', authenticateToken, ProductController.approveCategoryRequest);
 router.put('/admin/category-requests/:id/reject', authenticateToken, ProductController.rejectCategoryRequest);
+router.put('/admin/category-requests/:id', authenticateToken, ProductController.updateCategoryOption);
+router.delete('/admin/category-requests/:id', authenticateToken, ProductController.deleteCategoryRequest);
 
 // CREATE
 router.post('/', authenticateToken, requireVerifiedUser, ProductController.create);

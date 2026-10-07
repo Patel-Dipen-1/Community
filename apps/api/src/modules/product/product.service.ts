@@ -397,19 +397,24 @@ export class ProductService {
     return request;
   }
 
-  // Get unified global categories and attributes (Defaults + Super Admin Approved Custom Choices)
+  // Get unified global categories and attributes (Defaults + Super Admin Approved Custom Choices - DELETED/REJECTED choices)
   static async getGlobalOptions() {
-    const approvedRequests = await prisma.categoryAttributeRequest.findMany({
-      where: { status: 'APPROVED' },
-      select: { type: true, value: true },
+    const allDbOptions = await prisma.categoryAttributeRequest.findMany({
+      select: { id: true, type: true, value: true, status: true },
     });
 
-    const defaultCategories = ['Ethnic & Kurtis', 'Western Wear', 'Sarees & Lehengas', "Men's Wear", 'Kidswear', 'Fabrics & Dress Materials', 'Innerwear & Sleepwear'];
+    const deletedValuesSet = new Set(
+      allDbOptions.filter((r) => r.status === 'DELETED' || r.status === 'REJECTED').map((r) => r.value.trim().toLowerCase())
+    );
+
+    const approvedDbOptions = allDbOptions.filter((r) => r.status === 'APPROVED');
+
+    const defaultClothingCategories = ['Ethnic & Kurtis', 'Western Wear', 'Sarees & Lehengas', "Men's Wear", 'Kidswear', 'Fabrics & Dress Materials', 'Innerwear & Sleepwear'];
     const defaultFabrics = ['100% Combed Cotton', 'Pure Silk', 'Denim', 'Rayon', 'Chiffon', 'Linen', 'Polyester Blend', 'Georgette', 'Velvet', 'Handloom Linen'];
     const defaultGenders = ['Women', 'Men', 'Unisex', 'Kids'];
     const defaultFitTypes = ['Regular Fit', 'Slim Fit', 'Oversized', 'Tailored Fit'];
     const defaultSeasons = ['Casual Wear', 'Festive / Wedding', 'Formal Workwear', 'Summer Collection', 'Winter Special'];
-    const defaultSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size'];
+    const defaultSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL', 'Free Size'];
     const defaultPatterns = ['Plain Solid', 'Digital Printed', 'Heavy Embroidery', 'Zari Work', 'Hand Block Printed', 'Chikan Work'];
 
     // Hardware Options
@@ -438,49 +443,40 @@ export class ProductService {
     const defaultGroceryShelfLives = ['3 Months', '6 Months', '12 Months', '24 Months'];
     const defaultGroceryCertifications = ['FSSAI Licensed & Certified', '100% Organic Certified', 'ISO Standard', 'Non-GMO Certified'];
 
-    const customCategories = approvedRequests.filter((r) => r.type === 'CATEGORY').map((r) => r.value);
-    const customFabrics = approvedRequests.filter((r) => r.type === 'FABRIC').map((r) => r.value);
-    const customGenders = approvedRequests.filter((r) => r.type === 'GENDER').map((r) => r.value);
-    const customFits = approvedRequests.filter((r) => r.type === 'FIT').map((r) => r.value);
-    const customSeasons = approvedRequests.filter((r) => r.type === 'SEASON').map((r) => r.value);
-    const customSizes = approvedRequests.filter((r) => r.type === 'SIZE').map((r) => r.value);
-    const customPatterns = approvedRequests.filter((r) => r.type === 'PATTERN').map((r) => r.value);
-
-    const categories = Array.from(new Set([...defaultCategories, ...customCategories]));
-    const fabrics = Array.from(new Set([...defaultFabrics, ...customFabrics]));
-    const genders = Array.from(new Set([...defaultGenders, ...customGenders]));
-    const fitTypes = Array.from(new Set([...defaultFitTypes, ...customFits]));
-    const seasons = Array.from(new Set([...defaultSeasons, ...customSeasons]));
-    const sizes = Array.from(new Set([...defaultSizes, ...customSizes]));
-    const patterns = Array.from(new Set([...defaultPatterns, ...customPatterns]));
+    // Merge defaults + DB approved options, excluding any deleted/rejected values
+    const mergeOptions = (defaults: string[], typeName: string) => {
+      const dbValues = approvedDbOptions.filter((r) => r.type === typeName).map((r) => r.value);
+      const combined = Array.from(new Set([...defaults, ...dbValues]));
+      return combined.filter((v) => !deletedValuesSet.has(v.trim().toLowerCase()));
+    };
 
     return {
-      categories,
-      clothingCategories: categories,
-      hardwareCategories: defaultHardwareCategories,
-      jewelleryCategories: defaultJewelleryCategories,
-      electronicsCategories: defaultElectronicsCategories,
-      groceryCategories: defaultGroceryCategories,
-      fabrics,
-      genders,
-      fitTypes,
-      seasons,
-      sizes,
-      patterns,
-      hardwareMaterials: defaultHardwareMaterials,
-      hardwareWarranties: defaultHardwareWarranties,
-      hardwarePowerRatings: defaultHardwarePowerRatings,
-      hardwareFinishes: defaultHardwareFinishes,
-      hardwareApplications: defaultHardwareApplications,
-      jewelleryPurities: defaultJewelleryPurities,
-      jewelleryGemstones: defaultJewelleryGemstones,
-      jewelleryCertifications: defaultJewelleryCertifications,
-      electronicsPowerSources: defaultElectronicsPowerSources,
-      electronicsConnectivities: defaultElectronicsConnectivities,
-      electronicsWarranties: defaultElectronicsWarranties,
-      groceryPackagings: defaultGroceryPackagings,
-      groceryShelfLives: defaultGroceryShelfLives,
-      groceryCertifications: defaultGroceryCertifications,
+      categories: mergeOptions(defaultClothingCategories, 'CATEGORY'),
+      clothingCategories: mergeOptions(defaultClothingCategories, 'CATEGORY_CLOTHING'),
+      hardwareCategories: mergeOptions(defaultHardwareCategories, 'CATEGORY_HARDWARE'),
+      jewelleryCategories: mergeOptions(defaultJewelleryCategories, 'CATEGORY_JEWELLERY'),
+      electronicsCategories: mergeOptions(defaultElectronicsCategories, 'CATEGORY_ELECTRONICS'),
+      groceryCategories: mergeOptions(defaultGroceryCategories, 'CATEGORY_GROCERY'),
+      fabrics: mergeOptions(defaultFabrics, 'FABRIC'),
+      genders: mergeOptions(defaultGenders, 'GENDER'),
+      fitTypes: mergeOptions(defaultFitTypes, 'FIT'),
+      seasons: mergeOptions(defaultSeasons, 'SEASON'),
+      sizes: mergeOptions(defaultSizes, 'SIZE'),
+      patterns: mergeOptions(defaultPatterns, 'PATTERN'),
+      hardwareMaterials: mergeOptions(defaultHardwareMaterials, 'HARDWARE_MATERIAL'),
+      hardwareWarranties: mergeOptions(defaultHardwareWarranties, 'HARDWARE_WARRANTY'),
+      hardwarePowerRatings: mergeOptions(defaultHardwarePowerRatings, 'HARDWARE_POWER'),
+      hardwareFinishes: mergeOptions(defaultHardwareFinishes, 'HARDWARE_FINISH'),
+      hardwareApplications: mergeOptions(defaultHardwareApplications, 'HARDWARE_APPLICATION'),
+      jewelleryPurities: mergeOptions(defaultJewelleryPurities, 'JEWELLERY_PURITY'),
+      jewelleryGemstones: mergeOptions(defaultJewelleryGemstones, 'JEWELLERY_GEMSTONE'),
+      jewelleryCertifications: mergeOptions(defaultJewelleryCertifications, 'JEWELLERY_CERT'),
+      electronicsPowerSources: mergeOptions(defaultElectronicsPowerSources, 'ELEC_POWER'),
+      electronicsConnectivities: mergeOptions(defaultElectronicsConnectivities, 'ELEC_CONN'),
+      electronicsWarranties: mergeOptions(defaultElectronicsWarranties, 'ELEC_WARRANTY'),
+      groceryPackagings: mergeOptions(defaultGroceryPackagings, 'GROCERY_PACK'),
+      groceryShelfLives: mergeOptions(defaultGroceryShelfLives, 'GROCERY_SHELF'),
+      groceryCertifications: mergeOptions(defaultGroceryCertifications, 'GROCERY_CERT'),
     };
   }
 
@@ -549,5 +545,111 @@ export class ProductService {
     });
 
     return updated;
+  }
+
+  // Super Admin: Delete / Remove Category or Attribute Option
+  static async deleteCategoryAttributeRequest(requestIdOrValue: string) {
+    // Check if UUID ID matches
+    const existingById = await prisma.categoryAttributeRequest.findUnique({
+      where: { id: requestIdOrValue },
+    });
+
+    if (existingById) {
+      const updated = await prisma.categoryAttributeRequest.update({
+        where: { id: requestIdOrValue },
+        data: { status: 'DELETED' },
+      });
+      return updated;
+    }
+
+    // Check if value matches
+    const existingByValue = await prisma.categoryAttributeRequest.findFirst({
+      where: { value: { equals: requestIdOrValue, mode: 'insensitive' } },
+    });
+
+    if (existingByValue) {
+      const updated = await prisma.categoryAttributeRequest.update({
+        where: { id: existingByValue.id },
+        data: { status: 'DELETED' },
+      });
+      return updated;
+    }
+
+    // Default option not yet in DB -> Insert as DELETED so getGlobalOptions excludes it
+    const adminUser = await prisma.user.findFirst();
+
+    const deleted = await prisma.categoryAttributeRequest.create({
+      data: {
+        userId: adminUser?.id || 'system-admin',
+        type: 'ATTRIBUTE',
+        value: requestIdOrValue,
+        description: 'Option deleted by Super Admin',
+        status: 'DELETED',
+      },
+    });
+
+    return deleted;
+  }
+
+  // Super Admin: Create new category/attribute option directly
+  static async createAdminCategoryAttributeOption(userId: string, type: string, value: string, description?: string) {
+    const existing = await prisma.categoryAttributeRequest.findFirst({
+      where: { type, value: { equals: value.trim(), mode: 'insensitive' } },
+    });
+
+    if (existing) {
+      return await prisma.categoryAttributeRequest.update({
+        where: { id: existing.id },
+        data: { status: 'APPROVED', value: value.trim(), description: description || null },
+      });
+    }
+
+    return await prisma.categoryAttributeRequest.create({
+      data: {
+        userId,
+        type: type.trim(),
+        value: value.trim(),
+        description: description || null,
+        status: 'APPROVED',
+      },
+    });
+  }
+
+  // Super Admin: Update existing category/attribute option value
+  static async updateCategoryAttributeOption(idOrOldValue: string, newValue: string) {
+    const existing = await prisma.categoryAttributeRequest.findFirst({
+      where: {
+        OR: [{ id: idOrOldValue }, { value: { equals: idOrOldValue.trim(), mode: 'insensitive' } }],
+      },
+    });
+
+    if (existing) {
+      return await prisma.categoryAttributeRequest.update({
+        where: { id: existing.id },
+        data: { value: newValue.trim(), status: 'APPROVED' },
+      });
+    }
+
+    const adminUser = await prisma.user.findFirst();
+
+    // Soft delete old default value
+    await prisma.categoryAttributeRequest.create({
+      data: {
+        userId: adminUser?.id || 'system-admin',
+        type: 'ATTRIBUTE',
+        value: idOrOldValue.trim(),
+        status: 'DELETED',
+      },
+    });
+
+    // Create new approved replacement
+    return await prisma.categoryAttributeRequest.create({
+      data: {
+        userId: adminUser?.id || 'system-admin',
+        type: 'ATTRIBUTE',
+        value: newValue.trim(),
+        status: 'APPROVED',
+      },
+    });
   }
 }
