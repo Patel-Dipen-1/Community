@@ -12,38 +12,96 @@ import {
   CategoryRequestData,
 } from '../../../lib/redux/api/productsApi';
 
-const SPEC_GROUPS: { typeKey: string; label: string; icon: string; category: string }[] = [
-  { typeKey: 'JEWELLERY_PURITY', label: 'Jewellery Purities', icon: '💎', category: 'Jewellery Community' },
-  { typeKey: 'JEWELLERY_GEMSTONE', label: 'Jewellery Gemstones', icon: '✨', category: 'Jewellery Community' },
-  { typeKey: 'JEWELLERY_CERT', label: 'Jewellery Certifications', icon: '📜', category: 'Jewellery Community' },
-  { typeKey: 'FABRIC', label: 'Fabric Types', icon: '👕', category: 'Clothing Community' },
-  { typeKey: 'GENDER', label: 'Target Gender / Age', icon: '👥', category: 'Clothing Community' },
-  { typeKey: 'FIT', label: 'Fit Types', icon: '✂️', category: 'Clothing Community' },
-  { typeKey: 'SEASON', label: 'Season / Occasion', icon: '🗓️', category: 'Clothing Community' },
-  { typeKey: 'SIZE', label: 'Sizes', icon: '📏', category: 'Clothing Community' },
-  { typeKey: 'PATTERN', label: 'Patterns & Work', icon: '🎨', category: 'Clothing Community' },
-  { typeKey: 'CATEGORY_CLOTHING', label: 'Clothing Categories', icon: '👔', category: 'Clothing Community' },
-  { typeKey: 'HARDWARE_MATERIAL', label: 'Hardware Materials', icon: '🔩', category: 'Hardware Community' },
-  { typeKey: 'HARDWARE_WARRANTY', label: 'Hardware Warranties', icon: '🛡️', category: 'Hardware Community' },
-  { typeKey: 'HARDWARE_POWER', label: 'Power Ratings', icon: '⚡', category: 'Hardware Community' },
-  { typeKey: 'HARDWARE_FINISH', label: 'Finishes', icon: '✨', category: 'Hardware Community' },
-  { typeKey: 'HARDWARE_APPLICATION', label: 'Applications', icon: '🏗️', category: 'Hardware Community' },
-  { typeKey: 'CATEGORY_HARDWARE', label: 'Hardware Categories', icon: '🔧', category: 'Hardware Community' },
-  { typeKey: 'ELEC_POWER', label: 'Power Sources', icon: '🔋', category: 'Electronics Community' },
-  { typeKey: 'ELEC_CONN', label: 'Connectivity Types', icon: '📡', category: 'Electronics Community' },
-  { typeKey: 'ELEC_WARRANTY', label: 'Electronics Warranties', icon: '🏷️', category: 'Electronics Community' },
-  { typeKey: 'CATEGORY_ELECTRONICS', label: 'Electronics Categories', icon: '💻', category: 'Electronics Community' },
-  { typeKey: 'GROCERY_PACK', label: 'Packaging Types', icon: '📦', category: 'Grocery Community' },
-  { typeKey: 'GROCERY_SHELF', label: 'Shelf Life Options', icon: '⏳', category: 'Grocery Community' },
-  { typeKey: 'GROCERY_CERT', label: 'Grocery Certifications', icon: '🌱', category: 'Grocery Community' },
-  { typeKey: 'CATEGORY_GROCERY', label: 'Grocery Categories', icon: '🌾', category: 'Grocery Community' },
+interface SpecDef {
+  typeKey: string;
+  label: string;
+  icon: string;
+}
+
+interface CommunitySection {
+  communityId: string;
+  communityName: string;
+  icon: string;
+  description: string;
+  specs: SpecDef[];
+}
+
+const COMMUNITY_SECTIONS: CommunitySection[] = [
+  {
+    communityId: 'clothing',
+    communityName: '👕 Clothing & Textiles Community',
+    icon: '👕',
+    description: 'Categories, Sizes, Fit Types, Fabric Types, Target Genders, Seasons & Patterns.',
+    specs: [
+      { typeKey: 'CATEGORY_CLOTHING', label: 'Clothing Categories', icon: '👔' },
+      { typeKey: 'SIZE', label: 'Sizes', icon: '📏' },
+      { typeKey: 'FIT', label: 'Fit Types', icon: '✂️' },
+      { typeKey: 'FABRIC', label: 'Fabric Types', icon: '👕' },
+      { typeKey: 'GENDER', label: 'Target Gender / Age', icon: '👥' },
+      { typeKey: 'SEASON', label: 'Season / Occasion', icon: '🗓️' },
+      { typeKey: 'PATTERN', label: 'Patterns & Work', icon: '🎨' },
+    ],
+  },
+  {
+    communityId: 'jewellery',
+    communityName: '💎 Jewellery & Gems Community',
+    icon: '💎',
+    description: 'Jewellery Categories, Purities, Gemstones & Certifications.',
+    specs: [
+      { typeKey: 'CATEGORY_JEWELLERY', label: 'Jewellery Categories', icon: '💎' },
+      { typeKey: 'JEWELLERY_PURITY', label: 'Jewellery Purities', icon: '✨' },
+      { typeKey: 'JEWELLERY_GEMSTONE', label: 'Jewellery Gemstones', icon: '📜' },
+      { typeKey: 'JEWELLERY_CERT', label: 'Jewellery Certifications', icon: '🏷️' },
+    ],
+  },
+  {
+    communityId: 'hardware',
+    communityName: '🔧 Hardware & Industrial Tools Community',
+    icon: '🔧',
+    description: 'Hardware Categories, Materials, Warranties, Power Ratings, Finishes & Applications.',
+    specs: [
+      { typeKey: 'CATEGORY_HARDWARE', label: 'Hardware Categories', icon: '🔧' },
+      { typeKey: 'HARDWARE_MATERIAL', label: 'Hardware Materials', icon: '🔩' },
+      { typeKey: 'HARDWARE_WARRANTY', label: 'Hardware Warranties', icon: '🛡️' },
+      { typeKey: 'HARDWARE_POWER', label: 'Power Ratings', icon: '⚡' },
+      { typeKey: 'HARDWARE_FINISH', label: 'Finishes', icon: '✨' },
+      { typeKey: 'HARDWARE_APPLICATION', label: 'Applications', icon: '🏗️' },
+    ],
+  },
+  {
+    communityId: 'electronics',
+    communityName: '⚡ Electronics & Electricals Community',
+    icon: '⚡',
+    description: 'Electronics Categories, Power Sources, Connectivities & Warranties.',
+    specs: [
+      { typeKey: 'CATEGORY_ELECTRONICS', label: 'Electronics Categories', icon: '💻' },
+      { typeKey: 'ELEC_POWER', label: 'Power Sources', icon: '🔋' },
+      { typeKey: 'ELEC_CONN', label: 'Connectivity Types', icon: '📡' },
+      { typeKey: 'ELEC_WARRANTY', label: 'Electronics Warranties', icon: '🏷️' },
+    ],
+  },
+  {
+    communityId: 'grocery',
+    communityName: '🌾 Grocery & Packaged Staples Community',
+    icon: '🌾',
+    description: 'Grocery Categories, Packaging Types, Shelf Lives & Certifications.',
+    specs: [
+      { typeKey: 'CATEGORY_GROCERY', label: 'Grocery Categories', icon: '🌾' },
+      { typeKey: 'GROCERY_PACK', label: 'Packaging Types', icon: '📦' },
+      { typeKey: 'GROCERY_SHELF', label: 'Shelf Life Options', icon: '⏳' },
+      { typeKey: 'GROCERY_CERT', label: 'Grocery Certifications', icon: '🌱' },
+    ],
+  },
 ];
 
 export function AdminCategoryRequestsPanel() {
-  const [activeTab, setActiveTab] = useState<'REQUESTS' | 'HIERARCHY'>('REQUESTS');
+  const [activeTab, setActiveTab] = useState<'REQUESTS' | 'HIERARCHY'>('HIERARCHY');
   const [statusFilter, setStatusFilter] = useState<'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL'>('PENDING');
   const [searchQuery, setSearchQuery] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+
+  // Active expanded community section (null = expand all)
+  const [selectedCommunityFilter, setSelectedCommunityFilter] = useState<string>('ALL');
 
   // Reclassify / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -76,7 +134,6 @@ export function AdminCategoryRequestsPanel() {
     refetchGlobalOptions();
   };
 
-  // Open Modal to Approve & Optionally Reclassify Request
   const openApproveModal = (req: CategoryRequestData) => {
     setSelectedRequest(req);
     setFormType(req.type);
@@ -87,7 +144,6 @@ export function AdminCategoryRequestsPanel() {
     setIsModalOpen(true);
   };
 
-  // Open Modal to Edit Existing Option
   const openEditModal = (req: CategoryRequestData) => {
     setSelectedRequest(req);
     setFormType(req.type);
@@ -98,7 +154,6 @@ export function AdminCategoryRequestsPanel() {
     setIsModalOpen(true);
   };
 
-  // Open Modal to Create New Option directly
   const openCreateModal = (defaultTypeKey: string = 'FABRIC') => {
     setSelectedRequest(null);
     setFormType(defaultTypeKey);
@@ -109,7 +164,6 @@ export function AdminCategoryRequestsPanel() {
     setIsModalOpen(true);
   };
 
-  // Save Modal Action
   const handleSaveModal = async () => {
     const finalType = (formType === 'CUSTOM' ? customTypeInput : formType).trim().toUpperCase();
     if (!finalType) {
@@ -128,7 +182,7 @@ export function AdminCategoryRequestsPanel() {
           type: finalType,
           value: formValue.trim(),
         }).unwrap();
-        showNotification(`✅ Approved & Reclassified '${formValue.trim()}' under ${finalType}! It is now live for all users.`);
+        showNotification(`✅ Approved & Reclassified '${formValue.trim()}' under ${finalType}! Available globally.`);
       } else if (modalMode === 'EDIT' && selectedRequest) {
         await updateOption({
           id: selectedRequest.id,
@@ -228,7 +282,6 @@ export function AdminCategoryRequestsPanel() {
     }
   };
 
-  // Helper to get active global options by type key from globalOptions
   const getGlobalValuesForGroup = (typeKey: string): string[] => {
     if (!globalOptions) return [];
     switch (typeKey) {
@@ -241,7 +294,7 @@ export function AdminCategoryRequestsPanel() {
       case 'SEASON': return globalOptions.seasons || [];
       case 'SIZE': return globalOptions.sizes || [];
       case 'PATTERN': return globalOptions.patterns || [];
-      case 'CATEGORY_CLOTHING': return globalOptions.clothingCategories || [];
+      case 'CATEGORY_CLOTHING': return globalOptions.clothingCategories || globalOptions.categories || [];
       case 'HARDWARE_MATERIAL': return globalOptions.hardwareMaterials || [];
       case 'HARDWARE_WARRANTY': return globalOptions.hardwareWarranties || [];
       case 'HARDWARE_POWER': return globalOptions.hardwarePowerRatings || [];
@@ -260,6 +313,10 @@ export function AdminCategoryRequestsPanel() {
     }
   };
 
+  const visibleCommunities = COMMUNITY_SECTIONS.filter(
+    (c) => selectedCommunityFilter === 'ALL' || c.communityId === selectedCommunityFilter
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Top Banner Header */}
@@ -267,30 +324,15 @@ export function AdminCategoryRequestsPanel() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-2xl">🏷️</span>
-            <h2 className="font-extrabold text-xl text-white">Dynamic Category & Specification Management</h2>
+            <h2 className="font-extrabold text-xl text-white">Dynamic Category & Community Specifications (CRUD)</h2>
           </div>
           <p className="text-xs text-slate-400">
-            Super Admin center to review vendor requests, reclassify specification attributes, and manage all category specification options across Jewellery, Clothing, Hardware, Electronics & Grocery.
+            Super Admin center: Easily manage category specification options grouped by trade community (Clothing, Jewellery, Hardware, Electronics, Grocery) and approve vendor requests.
           </p>
         </div>
 
         {/* View Switcher Tabs */}
         <div className="flex items-center gap-2 bg-slate-900/90 p-1.5 rounded-xl border border-slate-800">
-          <button
-            onClick={() => setActiveTab('REQUESTS')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${
-              activeTab === 'REQUESTS'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>⏳ Pending Queue & History</span>
-            {pendingCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-extrabold text-[10px]">
-                {pendingCount}
-              </span>
-            )}
-          </button>
           <button
             onClick={() => setActiveTab('HIERARCHY')}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${
@@ -299,7 +341,22 @@ export function AdminCategoryRequestsPanel() {
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <span>🌳 Category & Spec Hierarchy</span>
+            <span>🌳 Community Spec Hierarchy</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('REQUESTS')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${
+              activeTab === 'REQUESTS'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>⏳ Vendor Request Queue</span>
+            {pendingCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-extrabold text-[10px]">
+                {pendingCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -311,7 +368,147 @@ export function AdminCategoryRequestsPanel() {
         </div>
       )}
 
-      {/* VIEW 1: REQUESTS QUEUE & TABLE */}
+      {/* VIEW 1: CATEGORY & SPECIFICATION HIERARCHY BY COMMUNITY */}
+      {activeTab === 'HIERARCHY' && (
+        <div className="space-y-6">
+          {/* Filter Communities Bar */}
+          <div className="flex items-center justify-between flex-wrap gap-4 glass-card p-4 rounded-2xl border-slate-800">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-slate-400 mr-1">Filter Community:</span>
+              <button
+                onClick={() => setSelectedCommunityFilter('ALL')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                  selectedCommunityFilter === 'ALL'
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white'
+                }`}
+              >
+                🌐 All Communities
+              </button>
+              {COMMUNITY_SECTIONS.map((c) => (
+                <button
+                  key={c.communityId}
+                  onClick={() => setSelectedCommunityFilter(c.communityId)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    selectedCommunityFilter === c.communityId
+                      ? 'bg-indigo-600 text-white shadow'
+                      : 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <span>{c.icon}</span>
+                  <span>{c.communityName.split(' ')[1]}</span>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => openCreateModal('FABRIC')}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg transition flex items-center gap-2"
+            >
+              <span>➕ Add New Option</span>
+            </button>
+          </div>
+
+          {/* Render Community Accordion Cards */}
+          {visibleCommunities.map((comm) => (
+            <div key={comm.communityId} className="glass-card p-6 rounded-2xl border-slate-800 space-y-6">
+              {/* Community Card Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800 flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl p-3 rounded-2xl bg-slate-900 border border-slate-800">{comm.icon}</span>
+                  <div>
+                    <h3 className="font-extrabold text-lg text-white">{comm.communityName}</h3>
+                    <p className="text-xs text-slate-400">{comm.description}</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => openCreateModal(comm.specs[0]?.typeKey || 'FABRIC')}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white text-xs font-bold border border-indigo-500/40 transition flex items-center gap-1.5"
+                >
+                  <span>➕ Add {comm.communityName.split(' ')[1]} Option</span>
+                </button>
+              </div>
+
+              {/* Grid of Specification Attributes inside this Community */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {comm.specs.map((spec) => {
+                  const values = getGlobalValuesForGroup(spec.typeKey);
+                  const dbRequests = (requests || []).filter(
+                    (r) => r.type === spec.typeKey && r.status === 'APPROVED'
+                  );
+
+                  return (
+                    <div key={spec.typeKey} className="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between hover:border-slate-700 transition">
+                      <div>
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-800/80 mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{spec.icon}</span>
+                            <h4 className="font-bold text-xs text-white">{spec.label}</h4>
+                            <span className="text-[9px] font-mono font-bold text-indigo-400 bg-indigo-950 px-1.5 py-0.5 rounded">
+                              {spec.typeKey}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => openCreateModal(spec.typeKey)}
+                            className="text-slate-400 hover:text-emerald-400 text-xs font-bold"
+                            title={`Add option to ${spec.label}`}
+                          >
+                            ➕ Add
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {values.length === 0 ? (
+                            <span className="text-[11px] text-slate-500 italic">No options defined yet.</span>
+                          ) : (
+                            values.map((val) => {
+                              const matchingReq = dbRequests.find(
+                                (r) => r.value.trim().toLowerCase() === val.trim().toLowerCase()
+                              );
+
+                              return (
+                                <div
+                                  key={val}
+                                  className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700/80 text-slate-200 text-[11px] font-medium flex items-center gap-1.5 group hover:border-indigo-500 transition"
+                                >
+                                  <span>{val}</span>
+                                  <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
+                                    <button
+                                      onClick={() =>
+                                        matchingReq
+                                          ? openEditModal(matchingReq)
+                                          : openEditModal({ id: val, type: spec.typeKey, value: val, status: 'APPROVED', createdAt: '' } as any)
+                                      }
+                                      className="text-slate-400 hover:text-indigo-400 text-[10px]"
+                                      title="Edit option"
+                                    >
+                                      ✏️
+                                    </button>
+                                    <button
+                                      onClick={() => handleDelete(matchingReq ? matchingReq.id : val, val)}
+                                      className="text-slate-400 hover:text-rose-400 text-[10px]"
+                                      title="Delete option"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* VIEW 2: REQUESTS QUEUE & TABLE */}
       {activeTab === 'REQUESTS' && (
         <div className="glass-card p-6 rounded-2xl border-slate-800 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-slate-800">
@@ -511,102 +708,6 @@ export function AdminCategoryRequestsPanel() {
         </div>
       )}
 
-      {/* VIEW 2: CATEGORY & SPECIFICATION HIERARCHY TREE */}
-      {activeTab === 'HIERARCHY' && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h3 className="font-extrabold text-lg text-white">Master Category & Specification Attributes</h3>
-              <p className="text-xs text-slate-400">
-                Manage specification options organized by Specification Title / Key. Click '➕ Add Sub-Option' to add values to any title, or click '✏️ Edit' / '🗑️ Delete' on any option badge.
-              </p>
-            </div>
-            <button
-              onClick={() => openCreateModal('FABRIC')}
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg transition flex items-center gap-2"
-            >
-              <span>➕ Add Specification Title / Option</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {SPEC_GROUPS.map((group) => {
-              const activeValues = getGlobalValuesForGroup(group.typeKey);
-              const customDbRequestsForGroup = (requests || []).filter(
-                (r) => r.type === group.typeKey && r.status === 'APPROVED'
-              );
-
-              return (
-                <div key={group.typeKey} className="glass-card p-5 rounded-2xl border-slate-800 space-y-4 hover:border-slate-700 transition">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xl p-2 rounded-xl bg-slate-900 border border-slate-800">{group.icon}</span>
-                      <div>
-                        <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
-                          <span>{group.label}</span>
-                          <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-900 px-2 py-0.5 rounded-md">
-                            {group.typeKey}
-                          </span>
-                        </h4>
-                        <p className="text-[11px] text-emerald-400 font-semibold">{group.category}</p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => openCreateModal(group.typeKey)}
-                      className="px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white text-xs font-bold border border-indigo-500/40 transition flex items-center gap-1"
-                    >
-                      <span>➕ Add Option</span>
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {activeValues.length === 0 ? (
-                      <span className="text-xs text-slate-500 italic">No active options for this specification.</span>
-                    ) : (
-                      activeValues.map((val) => {
-                        const matchingReq = customDbRequestsForGroup.find(
-                          (r) => r.value.trim().toLowerCase() === val.trim().toLowerCase()
-                        );
-
-                        return (
-                          <div
-                            key={val}
-                            className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 hover:border-indigo-500 transition group"
-                          >
-                            <span>{val}</span>
-                            <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100">
-                              <button
-                                onClick={() =>
-                                  matchingReq
-                                    ? openEditModal(matchingReq)
-                                    : openEditModal({ id: val, type: group.typeKey, value: val, status: 'APPROVED', createdAt: '' } as any)
-                                }
-                                className="text-slate-400 hover:text-indigo-400 p-0.5 text-[11px]"
-                                title="Edit option"
-                              >
-                                ✏️
-                              </button>
-                              <button
-                                onClick={() => handleDelete(matchingReq ? matchingReq.id : val, val)}
-                                className="text-slate-400 hover:text-rose-400 p-0.5 text-[11px]"
-                                title="Delete option"
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* INTERACTIVE MODAL FOR CREATING, EDITING & RECLASSIFYING OPTIONS */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -647,21 +748,22 @@ export function AdminCategoryRequestsPanel() {
             )}
 
             <div className="space-y-4">
-              {/* Target Specification Title / Group */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Select Target Specification Title / Group Key
+                  Select Target Specification Group Key
                 </label>
                 <select
                   value={formType}
                   onChange={(e) => setFormType(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-indigo-500 font-semibold"
                 >
-                  {SPEC_GROUPS.map((g) => (
-                    <option key={g.typeKey} value={g.typeKey}>
-                      {g.icon} {g.label} ({g.typeKey}) — {g.category}
-                    </option>
-                  ))}
+                  {COMMUNITY_SECTIONS.flatMap((comm) =>
+                    comm.specs.map((spec) => (
+                      <option key={spec.typeKey} value={spec.typeKey}>
+                        {comm.icon} {comm.communityName.split(' ')[1]} ➔ {spec.label} ({spec.typeKey})
+                      </option>
+                    ))
+                  )}
                   <option value="CUSTOM">➕ Create Custom Specification Group Title...</option>
                 </select>
               </div>
@@ -681,7 +783,6 @@ export function AdminCategoryRequestsPanel() {
                 </div>
               )}
 
-              {/* Sub-Option Value */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
                   Sub-Option Value Text (e.g. 24K Pure Gold (999), 100% Combed Cotton, 5XL)

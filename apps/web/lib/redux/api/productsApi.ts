@@ -107,6 +107,11 @@ export const productsApi = baseApi.injectEndpoints({
       providesTags: ['Products'],
     }),
 
+    getDynamicSchema: builder.query<any, void>({
+      query: () => '/products/dynamic-schema',
+      providesTags: ['Products'],
+    }),
+
     submitCategoryRequest: builder.mutation<{ message: string; request: CategoryRequestData }, { type: string; value: string; description?: string }>({
       query: (body) => ({
         url: '/products/category-requests',
@@ -185,6 +190,7 @@ export const {
   useUpdateProductMutation,
   useDeleteProductMutation,
   useGetGlobalOptionsQuery,
+  useGetDynamicSchemaQuery,
   useSubmitCategoryRequestMutation,
   useGetCategoryRequestsQuery,
   useApproveCategoryRequestMutation,

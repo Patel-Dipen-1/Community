@@ -480,6 +480,129 @@ export class ProductService {
     };
   }
 
+  // Get full hierarchical dynamic schema (Community -> Category -> Specification -> Options)
+  static async getDynamicSchema() {
+    const globalOptions = await this.getGlobalOptions();
+    const dbRequests = await prisma.categoryAttributeRequest.findMany({
+      where: { status: 'APPROVED' },
+    });
+
+    const customTypesSet = new Set(dbRequests.map((r) => r.type));
+
+    const communities = [
+      {
+        id: 'clothing',
+        name: 'Clothing & Textiles Community',
+        slug: 'clothing',
+        icon: '👕',
+        categories: (globalOptions.clothingCategories || []).map((name) => ({
+          id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          name,
+          slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        })),
+        specifications: [
+          { key: 'FABRIC', label: 'Fabric Type', inputType: 'SELECT', options: globalOptions.fabrics || [] },
+          { key: 'SIZE', label: 'Sizes', inputType: 'MULTI_SELECT', options: globalOptions.sizes || [] },
+          { key: 'FIT', label: 'Fit Type', inputType: 'SELECT', options: globalOptions.fitTypes || [] },
+          { key: 'GENDER', label: 'Target Gender / Age', inputType: 'SELECT', options: globalOptions.genders || [] },
+          { key: 'SEASON', label: 'Season / Occasion', inputType: 'SELECT', options: globalOptions.seasons || [] },
+          { key: 'PATTERN', label: 'Patterns & Work', inputType: 'SELECT', options: globalOptions.patterns || [] },
+        ],
+      },
+      {
+        id: 'jewellery',
+        name: 'Jewellery & Gems Community',
+        slug: 'jewellery',
+        icon: '💎',
+        categories: (globalOptions.jewelleryCategories || []).map((name) => ({
+          id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          name,
+          slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        })),
+        specifications: [
+          { key: 'JEWELLERY_PURITY', label: 'Gold / Metal Purity', inputType: 'SELECT', options: globalOptions.jewelleryPurities || [] },
+          { key: 'JEWELLERY_GEMSTONE', label: 'Gemstone Type', inputType: 'SELECT', options: globalOptions.jewelleryGemstones || [] },
+          { key: 'JEWELLERY_CERT', label: 'Certifications', inputType: 'SELECT', options: globalOptions.jewelleryCertifications || [] },
+        ],
+      },
+      {
+        id: 'hardware',
+        name: 'Hardware & Industrial Tools',
+        slug: 'hardware',
+        icon: '🔧',
+        categories: (globalOptions.hardwareCategories || []).map((name) => ({
+          id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          name,
+          slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        })),
+        specifications: [
+          { key: 'HARDWARE_MATERIAL', label: 'Material Grade', inputType: 'SELECT', options: globalOptions.hardwareMaterials || [] },
+          { key: 'HARDWARE_WARRANTY', label: 'Warranty Period', inputType: 'SELECT', options: globalOptions.hardwareWarranties || [] },
+          { key: 'HARDWARE_POWER', label: 'Power Rating', inputType: 'SELECT', options: globalOptions.hardwarePowerRatings || [] },
+          { key: 'HARDWARE_FINISH', label: 'Surface Finish', inputType: 'SELECT', options: globalOptions.hardwareFinishes || [] },
+          { key: 'HARDWARE_APPLICATION', label: 'Application', inputType: 'SELECT', options: globalOptions.hardwareApplications || [] },
+        ],
+      },
+      {
+        id: 'electronics',
+        name: 'Electronics & Electricals',
+        slug: 'electronics',
+        icon: '⚡',
+        categories: (globalOptions.electronicsCategories || []).map((name) => ({
+          id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          name,
+          slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        })),
+        specifications: [
+          { key: 'ELEC_POWER', label: 'Power Source', inputType: 'SELECT', options: globalOptions.electronicsPowerSources || [] },
+          { key: 'ELEC_CONN', label: 'Connectivity Type', inputType: 'SELECT', options: globalOptions.electronicsConnectivities || [] },
+          { key: 'ELEC_WARRANTY', label: 'Warranty Period', inputType: 'SELECT', options: globalOptions.electronicsWarranties || [] },
+        ],
+      },
+      {
+        id: 'grocery',
+        name: 'Grocery & FMCG Staples',
+        slug: 'grocery',
+        icon: '🌾',
+        categories: (globalOptions.groceryCategories || []).map((name) => ({
+          id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          name,
+          slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        })),
+        specifications: [
+          { key: 'GROCERY_PACK', label: 'Packaging Type', inputType: 'SELECT', options: globalOptions.groceryPackagings || [] },
+          { key: 'GROCERY_SHELF', label: 'Shelf Life', inputType: 'SELECT', options: globalOptions.groceryShelfLives || [] },
+          { key: 'GROCERY_CERT', label: 'Certification', inputType: 'SELECT', options: globalOptions.groceryCertifications || [] },
+        ],
+      },
+    ];
+
+    const standardKeys = new Set([
+      'FABRIC', 'SIZE', 'FIT', 'GENDER', 'SEASON', 'PATTERN',
+      'JEWELLERY_PURITY', 'JEWELLERY_GEMSTONE', 'JEWELLERY_CERT',
+      'HARDWARE_MATERIAL', 'HARDWARE_WARRANTY', 'HARDWARE_POWER', 'HARDWARE_FINISH', 'HARDWARE_APPLICATION',
+      'ELEC_POWER', 'ELEC_CONN', 'ELEC_WARRANTY',
+      'GROCERY_PACK', 'GROCERY_SHELF', 'GROCERY_CERT',
+      'CATEGORY', 'CATEGORY_CLOTHING', 'CATEGORY_HARDWARE', 'CATEGORY_JEWELLERY', 'CATEGORY_ELECTRONICS', 'CATEGORY_GROCERY'
+    ]);
+
+    customTypesSet.forEach((customType) => {
+      if (!standardKeys.has(customType)) {
+        const opts = dbRequests.filter((r) => r.type === customType).map((r) => r.value);
+        if (opts.length > 0) {
+          communities[0].specifications.push({
+            key: customType,
+            label: customType.replace(/_/g, ' '),
+            inputType: 'SELECT',
+            options: Array.from(new Set(opts)),
+          });
+        }
+      }
+    });
+
+    return { communities, globalOptions };
+  }
+
   // Super Admin: List all category & attribute requests
   static async getCategoryAttributeRequests(statusFilter?: string) {
     const requests = await prisma.categoryAttributeRequest.findMany({

@@ -236,12 +236,29 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
       setVideoUrlInput(initialProduct.videoUrl || '');
       setVideoUri('');
     } else if (isOpen && !initialProduct) {
-      setActiveCommunity('clothing');
+      const allowedList: string[] = (
+        user?.business?.allowedCommunities ||
+        (user as any)?.allowedCommunities ||
+        ['clothing', 'hardware', 'jewellery', 'electronics', 'grocery']
+      ).map((s: string) => String(s).toLowerCase());
+
+      const defaultComm = allowedList[0] || 'clothing';
+      setActiveCommunity(defaultComm);
       setTitle('');
       setCode(`SKU-B2B-${Math.floor(100 + Math.random() * 900)}`);
       setDescription('');
       setMoq('20');
-      setCategory('Ethnic & Kurtis');
+      setCategory(
+        defaultComm === 'hardware'
+          ? 'Power Tools'
+          : defaultComm === 'jewellery'
+          ? 'Gold Jewellery'
+          : defaultComm === 'electronics'
+          ? 'Smartphones & Accessories'
+          : defaultComm === 'grocery'
+          ? 'Spices & Masala'
+          : 'Ethnic & Kurtis'
+      );
       setFabric('100% Combed Cotton');
       setSelectedSizes(['M', 'L', 'XL']);
       setGender('Women');
@@ -260,7 +277,7 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
       setVideoUrlInput('');
       setCustomSpecRows([]);
     }
-  }, [isOpen, initialProduct]);
+  }, [isOpen, initialProduct, user]);
 
   // Handle Photo Pick from Phone Storage
   const handlePickPhotos = async () => {
@@ -619,24 +636,38 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
               {/* 1. INDUSTRY COMMUNITY SELECTOR */}
               <Text style={styles.sectionLabel}>Select Target Industry Community *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                {COMMUNITIES.map((c) => (
-                  <TouchableOpacity
-                    key={c.id}
-                    onPress={() => {
-                      setActiveCommunity(c.id);
-                      if (c.id === 'clothing') setCategory('Ethnic & Kurtis');
-                      else if (c.id === 'hardware') setCategory('Power Tools');
-                      else if (c.id === 'jewellery') setCategory('Gold Jewellery');
-                      else if (c.id === 'electronics') setCategory('Smartphones & Accessories');
-                      else if (c.id === 'grocery') setCategory('Spices & Masala');
-                    }}
-                    style={[styles.commTab, activeCommunity === c.id && styles.commTabActive]}
-                  >
-                    <Text style={[styles.commTabText, activeCommunity === c.id && styles.commTabTextActive]}>
-                      {c.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {(() => {
+                  const allowedList: string[] = (
+                    user?.business?.allowedCommunities ||
+                    (user as any)?.allowedCommunities ||
+                    ['clothing', 'hardware', 'jewellery', 'electronics', 'grocery']
+                  ).map((s: string) => String(s).toLowerCase());
+
+                  const visibleComms = COMMUNITIES.filter((c) =>
+                    allowedList.includes(c.id.toLowerCase())
+                  );
+
+                  const displayComms = visibleComms.length > 0 ? visibleComms : COMMUNITIES;
+
+                  return displayComms.map((c) => (
+                    <TouchableOpacity
+                      key={c.id}
+                      onPress={() => {
+                        setActiveCommunity(c.id);
+                        if (c.id === 'clothing') setCategory('Ethnic & Kurtis');
+                        else if (c.id === 'hardware') setCategory('Power Tools');
+                        else if (c.id === 'jewellery') setCategory('Gold Jewellery');
+                        else if (c.id === 'electronics') setCategory('Smartphones & Accessories');
+                        else if (c.id === 'grocery') setCategory('Spices & Masala');
+                      }}
+                      style={[styles.commTab, activeCommunity === c.id && styles.commTabActive]}
+                    >
+                      <Text style={[styles.commTabText, activeCommunity === c.id && styles.commTabTextActive]}>
+                        {c.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ));
+                })()}
               </ScrollView>
 
               {/* 2. UNIVERSAL COMMON BRACKET FIELDS */}

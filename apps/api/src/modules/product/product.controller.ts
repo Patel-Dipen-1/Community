@@ -109,6 +109,16 @@ export class ProductController {
     }
   }
 
+  // GET HIERARCHICAL DYNAMIC SCHEMA (COMMUNITY -> CATEGORY -> SPECIFICATION -> OPTIONS)
+  static async getDynamicSchema(req: Request, res: Response) {
+    try {
+      const schema = await ProductService.getDynamicSchema();
+      res.json(schema);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
   // SUBMIT CUSTOM CATEGORY / ATTRIBUTE REQUEST
   static async submitCategoryRequest(req: Request, res: Response) {
     try {

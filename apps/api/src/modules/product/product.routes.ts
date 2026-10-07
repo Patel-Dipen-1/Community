@@ -7,6 +7,7 @@ const router = Router();
 
 // GLOBAL CATEGORIES & ATTRIBUTES OPTIONS
 router.get('/options', ProductController.getGlobalOptions);
+router.get('/dynamic-schema', ProductController.getDynamicSchema);
 
 // SUBMIT CATEGORY / ATTRIBUTE REQUEST
 router.post('/category-requests', authenticateToken, ProductController.submitCategoryRequest);
