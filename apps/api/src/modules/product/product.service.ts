@@ -502,11 +502,15 @@ export class ProductService {
     return requests;
   }
 
-  // Super Admin: Approve Category/Attribute request
-  static async approveCategoryAttributeRequest(requestId: string) {
+  // Super Admin: Approve Category/Attribute request (with optional reclassification of type & value)
+  static async approveCategoryAttributeRequest(requestId: string, newType?: string, newValue?: string) {
+    const dataToUpdate: any = { status: 'APPROVED' };
+    if (newType && newType.trim()) dataToUpdate.type = newType.trim().toUpperCase();
+    if (newValue && newValue.trim()) dataToUpdate.value = newValue.trim();
+
     const updated = await prisma.categoryAttributeRequest.update({
       where: { id: requestId },
-      data: { status: 'APPROVED' },
+      data: dataToUpdate,
       include: {
         user: {
           select: {
@@ -607,7 +611,7 @@ export class ProductService {
     return await prisma.categoryAttributeRequest.create({
       data: {
         userId,
-        type: type.trim(),
+        type: type.trim().toUpperCase(),
         value: value.trim(),
         description: description || null,
         status: 'APPROVED',
@@ -615,8 +619,8 @@ export class ProductService {
     });
   }
 
-  // Super Admin: Update existing category/attribute option value
-  static async updateCategoryAttributeOption(idOrOldValue: string, newValue: string) {
+  // Super Admin: Update existing category/attribute option value & type
+  static async updateCategoryAttributeOption(idOrOldValue: string, newValue: string, newType?: string) {
     const existing = await prisma.categoryAttributeRequest.findFirst({
       where: {
         OR: [{ id: idOrOldValue }, { value: { equals: idOrOldValue.trim(), mode: 'insensitive' } }],
@@ -624,9 +628,12 @@ export class ProductService {
     });
 
     if (existing) {
+      const dataToUpdate: any = { value: newValue.trim(), status: 'APPROVED' };
+      if (newType && newType.trim()) dataToUpdate.type = newType.trim().toUpperCase();
+
       return await prisma.categoryAttributeRequest.update({
         where: { id: existing.id },
-        data: { value: newValue.trim(), status: 'APPROVED' },
+        data: dataToUpdate,
       });
     }
 
@@ -636,7 +643,7 @@ export class ProductService {
     await prisma.categoryAttributeRequest.create({
       data: {
         userId: adminUser?.id || 'system-admin',
-        type: 'ATTRIBUTE',
+        type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
         value: idOrOldValue.trim(),
         status: 'DELETED',
       },
@@ -646,7 +653,7 @@ export class ProductService {
     return await prisma.categoryAttributeRequest.create({
       data: {
         userId: adminUser?.id || 'system-admin',
-        type: 'ATTRIBUTE',
+        type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
         value: newValue.trim(),
         status: 'APPROVED',
       },

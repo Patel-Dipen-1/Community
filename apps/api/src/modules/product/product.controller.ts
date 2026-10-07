@@ -138,11 +138,12 @@ export class ProductController {
     }
   }
 
-  // SUPER ADMIN: APPROVE REQUEST
+  // SUPER ADMIN: APPROVE REQUEST (Support reclassification type & value)
   static async approveCategoryRequest(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const updated = await ProductService.approveCategoryAttributeRequest(id);
+      const { type, value } = req.body || {};
+      const updated = await ProductService.approveCategoryAttributeRequest(id, type, value);
       clearCacheByPattern('/products');
       res.json({
         message: 'Category/Attribute request approved and added globally for all users!',
@@ -199,12 +200,12 @@ export class ProductController {
     }
   }
 
-  // SUPER ADMIN: UPDATE EXISTING OPTION VALUE
+  // SUPER ADMIN: UPDATE EXISTING OPTION VALUE & TYPE
   static async updateCategoryOption(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { value } = req.body;
-      const updated = await ProductService.updateCategoryAttributeOption(id, value);
+      const { value, type } = req.body || {};
+      const updated = await ProductService.updateCategoryAttributeOption(id, value, type);
       clearCacheByPattern('/products');
       res.json({
         message: 'Category/Attribute option updated!',

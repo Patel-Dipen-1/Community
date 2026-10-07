@@ -9,21 +9,40 @@ export interface ProductFilterParams {
 
 export interface GlobalOptionsResponse {
   categories: string[];
+  clothingCategories?: string[];
+  hardwareCategories?: string[];
+  jewelleryCategories?: string[];
+  electronicsCategories?: string[];
+  groceryCategories?: string[];
   fabrics: string[];
   genders: string[];
   fitTypes: string[];
   seasons: string[];
   sizes: string[];
   patterns: string[];
+  hardwareMaterials?: string[];
+  hardwareWarranties?: string[];
+  hardwarePowerRatings?: string[];
+  hardwareFinishes?: string[];
+  hardwareApplications?: string[];
+  jewelleryPurities?: string[];
+  jewelleryGemstones?: string[];
+  jewelleryCertifications?: string[];
+  electronicsPowerSources?: string[];
+  electronicsConnectivities?: string[];
+  electronicsWarranties?: string[];
+  groceryPackagings?: string[];
+  groceryShelfLives?: string[];
+  groceryCertifications?: string[];
 }
 
 export interface CategoryRequestData {
   id: string;
   userId: string;
-  type: 'CATEGORY' | 'FABRIC' | 'GENDER' | 'FIT' | 'SEASON' | 'SIZE' | 'PATTERN';
+  type: string;
   value: string;
   description?: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'DELETED';
   rejectionReason?: string | null;
   createdAt: string;
   user?: {
@@ -105,11 +124,19 @@ export const productsApi = baseApi.injectEndpoints({
       providesTags: ['Products'],
     }),
 
-    approveCategoryRequest: builder.mutation<{ message: string; request: CategoryRequestData }, string>({
-      query: (id) => ({
-        url: `/products/admin/category-requests/${id}/approve`,
-        method: 'PUT',
-      }),
+    approveCategoryRequest: builder.mutation<
+      { message: string; request: CategoryRequestData },
+      string | { id: string; type?: string; value?: string }
+    >({
+      query: (arg) => {
+        const id = typeof arg === 'string' ? arg : arg.id;
+        const body = typeof arg === 'string' ? {} : { type: arg.type, value: arg.value };
+        return {
+          url: `/products/admin/category-requests/${id}/approve`,
+          method: 'PUT',
+          body,
+        };
+      },
       invalidatesTags: ['Products'],
     }),
 
@@ -126,6 +153,7 @@ export const productsApi = baseApi.injectEndpoints({
       query: (id) => ({
         url: `/products/admin/category-requests/${id}`,
         method: 'DELETE',
+        body: {},
       }),
       invalidatesTags: ['Products'],
     }),
@@ -139,11 +167,11 @@ export const productsApi = baseApi.injectEndpoints({
       invalidatesTags: ['Products'],
     }),
 
-    updateCategoryOption: builder.mutation<{ message: string; option: any }, { id: string; value: string }>({
-      query: ({ id, value }) => ({
+    updateCategoryOption: builder.mutation<{ message: string; option: any }, { id: string; value: string; type?: string }>({
+      query: ({ id, value, type }) => ({
         url: `/products/admin/category-requests/${id}`,
         method: 'PUT',
-        body: { value },
+        body: { value, type },
       }),
       invalidatesTags: ['Products'],
     }),

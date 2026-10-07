@@ -231,6 +231,82 @@ export async function seedDynamicSystem() {
     });
   }
 
+  // 9. Seed Default Category & Specification Options
+  const adminUser = await prisma.user.findFirst();
+  const systemUserId = adminUser?.id || 'system-admin';
+
+  const defaultCategoryOptions = [
+    // Jewellery
+    { type: 'JEWELLERY_PURITY', value: '24K Pure Gold (999)' },
+    { type: 'JEWELLERY_PURITY', value: '22K BIS Hallmarked (916)' },
+    { type: 'JEWELLERY_PURITY', value: '18K Diamond Gold (750)' },
+    { type: 'JEWELLERY_PURITY', value: '14K Gold' },
+    { type: 'JEWELLERY_PURITY', value: '1 Gram Micro Plated' },
+    { type: 'JEWELLERY_PURITY', value: '925 Sterling Silver' },
+    { type: 'JEWELLERY_GEMSTONE', value: 'Uncut Polki Diamond' },
+    { type: 'JEWELLERY_GEMSTONE', value: 'Real Solitaire Diamond' },
+    { type: 'JEWELLERY_GEMSTONE', value: 'Certified Emerald' },
+    { type: 'JEWELLERY_GEMSTONE', value: 'Cubic Zirconia (CZ)' },
+    // Clothing
+    { type: 'FABRIC', value: '100% Combed Cotton' },
+    { type: 'FABRIC', value: 'Pure Silk' },
+    { type: 'FABRIC', value: 'Denim' },
+    { type: 'FABRIC', value: 'Rayon' },
+    { type: 'FABRIC', value: 'Chiffon' },
+    { type: 'FABRIC', value: 'Linen' },
+    { type: 'GENDER', value: 'Women' },
+    { type: 'GENDER', value: 'Men' },
+    { type: 'GENDER', value: 'Unisex' },
+    { type: 'GENDER', value: 'Kids' },
+    { type: 'FIT', value: 'Regular Fit' },
+    { type: 'FIT', value: 'Slim Fit' },
+    { type: 'FIT', value: 'Oversized' },
+    { type: 'FIT', value: 'Tailored Fit' },
+    { type: 'SEASON', value: 'Casual Wear' },
+    { type: 'SEASON', value: 'Festive / Wedding' },
+    { type: 'SEASON', value: 'Formal Workwear' },
+    { type: 'SEASON', value: 'Summer Collection' },
+    { type: 'SEASON', value: 'Winter Special' },
+    { type: 'SIZE', value: 'S' },
+    { type: 'SIZE', value: 'M' },
+    { type: 'SIZE', value: 'L' },
+    { type: 'SIZE', value: 'XL' },
+    { type: 'SIZE', value: 'XXL' },
+    { type: 'SIZE', value: '3XL' },
+    { type: 'SIZE', value: '4XL' },
+    { type: 'SIZE', value: '5XL' },
+    { type: 'SIZE', value: 'Free Size' },
+    // Hardware
+    { type: 'HARDWARE_MATERIAL', value: 'Stainless Steel 304' },
+    { type: 'HARDWARE_MATERIAL', value: 'High Carbon Steel' },
+    { type: 'HARDWARE_MATERIAL', value: 'Brass' },
+    { type: 'HARDWARE_MATERIAL', value: 'Cast Iron' },
+    { type: 'HARDWARE_MATERIAL', value: 'Heavy Duty Alloy' },
+    { type: 'HARDWARE_WARRANTY', value: 'No Warranty' },
+    { type: 'HARDWARE_WARRANTY', value: '6 Months Brand Warranty' },
+    { type: 'HARDWARE_WARRANTY', value: '1 Year Manufacturer Warranty' },
+    { type: 'HARDWARE_WARRANTY', value: '2 Years Replacement Guarantee' },
+    { type: 'HARDWARE_WARRANTY', value: 'Lifetime Guarantee' },
+  ];
+
+  for (const opt of defaultCategoryOptions) {
+    const existing = await prisma.categoryAttributeRequest.findFirst({
+      where: { type: opt.type, value: { equals: opt.value, mode: 'insensitive' } },
+    });
+
+    if (!existing) {
+      await prisma.categoryAttributeRequest.create({
+        data: {
+          userId: systemUserId,
+          type: opt.type,
+          value: opt.value,
+          status: 'APPROVED',
+          description: 'Default System Option',
+        },
+      });
+    }
+  }
+
   console.log('✅ Dynamic System Seed completed successfully!');
 }
 
