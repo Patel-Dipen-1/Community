@@ -197,9 +197,9 @@ export class ProductController {
   // SUPER ADMIN: CREATE NEW OPTION DIRECTLY
   static async createAdminCategoryOption(req: Request, res: Response) {
     try {
-      const { type, value, description } = req.body;
+      const { type, value, description, communitySlug } = req.body;
       const userId = (req as any).user?.userId || (req as any).user?.id;
-      const option = await ProductService.createAdminCategoryAttributeOption(userId, type, value, description);
+      const option = await ProductService.createAdminCategoryAttributeOption(userId, type, value, description, communitySlug);
       clearCacheByPattern('/products');
       res.status(201).json({
         message: `Option '${value}' added globally!`,
@@ -210,17 +210,62 @@ export class ProductController {
     }
   }
 
-  // SUPER ADMIN: UPDATE EXISTING OPTION VALUE & TYPE
+  // SUPER ADMIN: UPDATE EXISTING OPTION VALUE & TYPE & COMMUNITY
   static async updateCategoryOption(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { value, type } = req.body || {};
-      const updated = await ProductService.updateCategoryAttributeOption(id, value, type);
+      const { value, type, communitySlug } = req.body || {};
+      const updated = await ProductService.updateCategoryAttributeOption(id, value, type, communitySlug);
       clearCacheByPattern('/products');
       res.json({
         message: 'Category/Attribute option updated!',
         option: updated,
       });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  // SUPER ADMIN: COMMUNITY CRUD HANDLERS
+  static async getCommunities(req: Request, res: Response) {
+    try {
+      const communities = await ProductService.getCommunities();
+      res.json(communities);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async createCommunity(req: Request, res: Response) {
+    try {
+      const { name, description } = req.body;
+      if (!name || !name.trim()) throw new Error('Community name is required');
+      const community = await ProductService.createCommunity(name, description);
+      clearCacheByPattern('/products');
+      res.status(201).json({ message: `Community '${name}' created!`, community });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async updateCommunity(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { name, description, isActive } = req.body;
+      const updated = await ProductService.updateCommunity(id, name, description, isActive);
+      clearCacheByPattern('/products');
+      res.json({ message: 'Community updated!', community: updated });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  }
+
+  static async deleteCommunity(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const deleted = await ProductService.deleteCommunity(id);
+      clearCacheByPattern('/products');
+      res.json({ message: 'Community deactivated!', community: deleted });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }

@@ -12,6 +12,12 @@ router.get('/dynamic-schema', ProductController.getDynamicSchema);
 // SUBMIT CATEGORY / ATTRIBUTE REQUEST
 router.post('/category-requests', authenticateToken, ProductController.submitCategoryRequest);
 
+// SUPER ADMIN COMMUNITY MANAGEMENT
+router.get('/admin/communities', ProductController.getCommunities);
+router.post('/admin/communities', authenticateToken, ProductController.createCommunity);
+router.put('/admin/communities/:id', authenticateToken, ProductController.updateCommunity);
+router.delete('/admin/communities/:id', authenticateToken, ProductController.deleteCommunity);
+
 // SUPER ADMIN CATEGORY & ATTRIBUTE REQUEST MANAGEMENT
 router.get('/admin/category-requests', authenticateToken, ProductController.getCategoryRequests);
 router.post('/admin/category-requests/create', authenticateToken, ProductController.createAdminCategoryOption);

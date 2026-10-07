@@ -163,7 +163,7 @@ export const productsApi = baseApi.injectEndpoints({
       invalidatesTags: ['Products'],
     }),
 
-    createAdminCategoryOption: builder.mutation<{ message: string; option: any }, { type: string; value: string; description?: string }>({
+    createAdminCategoryOption: builder.mutation<{ message: string; option: any }, { type: string; value: string; description?: string; communitySlug?: string }>({
       query: (body) => ({
         url: '/products/admin/category-requests/create',
         method: 'POST',
@@ -172,11 +172,42 @@ export const productsApi = baseApi.injectEndpoints({
       invalidatesTags: ['Products'],
     }),
 
-    updateCategoryOption: builder.mutation<{ message: string; option: any }, { id: string; value: string; type?: string }>({
-      query: ({ id, value, type }) => ({
+    updateCategoryOption: builder.mutation<{ message: string; option: any }, { id: string; value: string; type?: string; communitySlug?: string }>({
+      query: ({ id, value, type, communitySlug }) => ({
         url: `/products/admin/category-requests/${id}`,
         method: 'PUT',
-        body: { value, type },
+        body: { value, type, communitySlug },
+      }),
+      invalidatesTags: ['Products'],
+    }),
+
+    getCommunities: builder.query<any[], void>({
+      query: () => '/products/admin/communities',
+      providesTags: ['Products'],
+    }),
+
+    createCommunity: builder.mutation<{ message: string; community: any }, { name: string; description?: string }>({
+      query: (body) => ({
+        url: '/products/admin/communities',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Products'],
+    }),
+
+    updateCommunity: builder.mutation<{ message: string; community: any }, { id: string; name?: string; description?: string; isActive?: boolean }>({
+      query: ({ id, ...body }) => ({
+        url: `/products/admin/communities/${id}`,
+        method: 'PUT',
+        body,
+      }),
+      invalidatesTags: ['Products'],
+    }),
+
+    deleteCommunity: builder.mutation<{ message: string; community: any }, string>({
+      query: (id) => ({
+        url: `/products/admin/communities/${id}`,
+        method: 'DELETE',
       }),
       invalidatesTags: ['Products'],
     }),
@@ -198,4 +229,8 @@ export const {
   useDeleteCategoryRequestMutation,
   useCreateAdminCategoryOptionMutation,
   useUpdateCategoryOptionMutation,
+  useGetCommunitiesQuery,
+  useCreateCommunityMutation,
+  useUpdateCommunityMutation,
+  useDeleteCommunityMutation,
 } = productsApi;

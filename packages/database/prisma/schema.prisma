@@ -615,8 +615,9 @@ model PaymentTransaction {
 model CategoryAttributeRequest {
   id              String   @id @default(uuid())
   userId          String
-  type            String   // CATEGORY, FABRIC, GENDER, FIT, SEASON, SIZE, PATTERN
-  value           String
+  communitySlug   String?  @default("global")
+  type            String   // Specification group key (e.g. gsm, fabric, size, material)
+  value           String   // Option value text (e.g. 300gsm, Cotton, S)
   description     String?
   status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
   rejectionReason String?
@@ -628,6 +629,7 @@ model CategoryAttributeRequest {
   @@index([userId])
   @@index([status])
   @@index([type])
+  @@index([communitySlug])
   @@index([createdAt])
 }
 

@@ -718,8 +718,66 @@ export class ProductService {
     return deleted;
   }
 
+  // Super Admin: Community CRUD
+  static async getCommunities() {
+    const communities = await prisma.community.findMany({
+      orderBy: { createdAt: 'asc' },
+    });
+    return communities;
+  }
+
+  static async createCommunity(name: string, description?: string) {
+    const cleanName = name.trim();
+    const slug = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    
+    const existing = await prisma.community.findUnique({ where: { slug } });
+    if (existing) {
+      return await prisma.community.update({
+        where: { slug },
+        data: { name: cleanName, description: description || null, isActive: true },
+      });
+    }
+
+    return await prisma.community.create({
+      data: {
+        slug,
+        name: cleanName,
+        description: description || null,
+        isActive: true,
+      },
+    });
+  }
+
+  static async updateCommunity(id: string, name?: string, description?: string, isActive?: boolean) {
+    const dataToUpdate: any = {};
+    if (name && name.trim()) {
+      dataToUpdate.name = name.trim();
+      dataToUpdate.slug = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '-');
+    }
+    if (description !== undefined) dataToUpdate.description = description || null;
+    if (isActive !== undefined) dataToUpdate.isActive = Boolean(isActive);
+
+    return await prisma.community.update({
+      where: { id },
+      data: dataToUpdate,
+    });
+  }
+
+  static async deleteCommunity(id: string) {
+    return await prisma.community.update({
+      where: { id },
+      data: { isActive: false },
+    });
+  }
+
   // Super Admin: Create new category/attribute option directly
-  static async createAdminCategoryAttributeOption(userId?: string, type?: string, value?: string, description?: string) {
+  static async createAdminCategoryAttributeOption(
+    userId?: string,
+    type?: string,
+    value?: string,
+    description?: string,
+    communitySlug?: string
+  ) {
     let validUserId = userId;
     if (!validUserId) {
       const adminUser = await prisma.user.findFirst({ where: { status: 'APPROVED' } });
@@ -737,21 +795,32 @@ export class ProductService {
 
     const cleanType = (type || 'ATTRIBUTE').trim().toUpperCase();
     const cleanValue = (value || '').trim();
+    const cleanCommunitySlug = (communitySlug || 'global').trim().toLowerCase();
 
     const existing = await prisma.categoryAttributeRequest.findFirst({
-      where: { type: cleanType, value: { equals: cleanValue, mode: 'insensitive' } },
+      where: {
+        type: cleanType,
+        value: { equals: cleanValue, mode: 'insensitive' },
+        communitySlug: cleanCommunitySlug,
+      },
     });
 
     if (existing) {
       return await prisma.categoryAttributeRequest.update({
         where: { id: existing.id },
-        data: { status: 'APPROVED', value: cleanValue, description: description || null },
+        data: {
+          status: 'APPROVED',
+          value: cleanValue,
+          description: description || null,
+          communitySlug: cleanCommunitySlug,
+        },
       });
     }
 
     return await prisma.categoryAttributeRequest.create({
       data: {
         userId: validUserId,
+        communitySlug: cleanCommunitySlug,
         type: cleanType,
         value: cleanValue,
         description: description || null,
@@ -761,7 +830,7 @@ export class ProductService {
   }
 
   // Super Admin: Update existing category/attribute option value & type
-  static async updateCategoryAttributeOption(idOrOldValue: string, newValue: string, newType?: string) {
+  static async updateCategoryAttributeOption(idOrOldValue: string, newValue: string, newType?: string, communitySlug?: string) {
     const existing = await prisma.categoryAttributeRequest.findFirst({
       where: {
         OR: [{ id: idOrOldValue }, { value: { equals: idOrOldValue.trim(), mode: 'insensitive' } }],
@@ -771,6 +840,7 @@ export class ProductService {
     if (existing) {
       const dataToUpdate: any = { value: newValue.trim(), status: 'APPROVED' };
       if (newType && newType.trim()) dataToUpdate.type = newType.trim().toUpperCase();
+      if (communitySlug && communitySlug.trim()) dataToUpdate.communitySlug = communitySlug.trim().toLowerCase();
 
       return await prisma.categoryAttributeRequest.update({
         where: { id: existing.id },
@@ -784,6 +854,7 @@ export class ProductService {
     await prisma.categoryAttributeRequest.create({
       data: {
         userId: adminUser?.id || 'system-admin',
+        communitySlug: communitySlug ? communitySlug.trim().toLowerCase() : 'global',
         type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
         value: idOrOldValue.trim(),
         status: 'DELETED',
@@ -794,6 +865,7 @@ export class ProductService {
     return await prisma.categoryAttributeRequest.create({
       data: {
         userId: adminUser?.id || 'system-admin',
+        communitySlug: communitySlug ? communitySlug.trim().toLowerCase() : 'global',
         type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
         value: newValue.trim(),
         status: 'APPROVED',

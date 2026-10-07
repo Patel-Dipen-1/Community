@@ -9,6 +9,10 @@ import {
   useDeleteCategoryRequestMutation,
   useCreateAdminCategoryOptionMutation,
   useUpdateCategoryOptionMutation,
+  useGetCommunitiesQuery,
+  useCreateCommunityMutation,
+  useUpdateCommunityMutation,
+  useDeleteCommunityMutation,
   CategoryRequestData,
 } from '../../../lib/redux/api/productsApi';
 
@@ -100,17 +104,29 @@ export function AdminCategoryRequestsPanel() {
   const [searchQuery, setSearchQuery] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Active expanded community section (null = expand all)
+  // Active expanded community section ('ALL' or community slug e.g. 'dipen', 'clothing')
   const [selectedCommunityFilter, setSelectedCommunityFilter] = useState<string>('ALL');
+
+  // Community Modal State
+  const [isCommModalOpen, setIsCommModalOpen] = useState(false);
+  const [commNameInput, setCommNameInput] = useState('');
+  const [commDescInput, setCommDescInput] = useState('');
 
   // Reclassify / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'APPROVE_RECLASSIFY' | 'EDIT' | 'CREATE'>('APPROVE_RECLASSIFY');
   const [selectedRequest, setSelectedRequest] = useState<CategoryRequestData | null>(null);
+  const [formCommunitySlug, setFormCommunitySlug] = useState('clothing');
   const [formType, setFormType] = useState('FABRIC');
   const [customTypeInput, setCustomTypeInput] = useState('');
   const [formValue, setFormValue] = useState('');
   const [formDescription, setFormDescription] = useState('');
+
+  // Redux RTK Queries & Mutations
+  const { data: dbCommunities, refetch: refetchCommunities } = useGetCommunitiesQuery();
+  const [createCommunity, { isLoading: isCreatingComm }] = useCreateCommunityMutation();
+  const [updateCommunity] = useUpdateCommunityMutation();
+  const [deleteCommunity] = useDeleteCommunityMutation();
 
   // Redux RTK Queries & Mutations
   const { data: requests, isLoading: isRequestsLoading, refetch: refetchRequests } = useGetCategoryRequestsQuery(
@@ -154,14 +170,36 @@ export function AdminCategoryRequestsPanel() {
     setIsModalOpen(true);
   };
 
-  const openCreateModal = (defaultTypeKey: string = 'FABRIC') => {
+  const openCreateModal = (defaultTypeKey: string = 'FABRIC', targetCommSlug?: string) => {
     setSelectedRequest(null);
     setFormType(defaultTypeKey);
     setCustomTypeInput('');
     setFormValue('');
     setFormDescription('');
+    setFormCommunitySlug(targetCommSlug || (selectedCommunityFilter !== 'ALL' ? selectedCommunityFilter : 'clothing'));
     setModalMode('CREATE');
     setIsModalOpen(true);
+  };
+
+  const handleSaveCommunityModal = async () => {
+    if (!commNameInput.trim()) {
+      alert('Community Name is required');
+      return;
+    }
+    try {
+      const res = await createCommunity({
+        name: commNameInput.trim(),
+        description: commDescInput.trim() || undefined,
+      }).unwrap();
+      showNotification(`🎉 Community '${commNameInput.trim()}' created!`);
+      setIsCommModalOpen(false);
+      setCommNameInput('');
+      setCommDescInput('');
+      refetchCommunities();
+      refetchGlobalOptions();
+    } catch (err: any) {
+      alert(err?.data?.error || err?.message || 'Failed to create community');
+    }
   };
 
   const handleSaveModal = async () => {
@@ -182,21 +220,23 @@ export function AdminCategoryRequestsPanel() {
           type: finalType,
           value: formValue.trim(),
         }).unwrap();
-        showNotification(`✅ Approved & Reclassified '${formValue.trim()}' under ${finalType}! Available globally.`);
+        showNotification(`✅ Approved & Reclassified '${formValue.trim()}' under ${finalType}!`);
       } else if (modalMode === 'EDIT' && selectedRequest) {
         await updateOption({
           id: selectedRequest.id,
           type: finalType,
           value: formValue.trim(),
+          communitySlug: formCommunitySlug,
         }).unwrap();
-        showNotification(`✏️ Updated specification option to '${formValue.trim()}' (${finalType}) globally!`);
+        showNotification(`✏️ Updated specification option to '${formValue.trim()}' (${finalType})!`);
       } else if (modalMode === 'CREATE') {
         await createOption({
           type: finalType,
           value: formValue.trim(),
           description: formDescription.trim() || undefined,
+          communitySlug: formCommunitySlug,
         }).unwrap();
-        showNotification(`🎉 Added new option '${formValue.trim()}' to ${finalType} globally!`);
+        showNotification(`🎉 Added new option '${formValue.trim()}' to ${finalType} under ${formCommunitySlug}!`);
       }
 
       setIsModalOpen(false);
@@ -399,21 +439,38 @@ export function AdminCategoryRequestsPanel() {
                   <span>{c.communityName.split(' ')[1]}</span>
                 </button>
               ))}
+              {(dbCommunities || [])
+                .filter((dbc) => !COMMUNITY_SECTIONS.some((c) => c.communityId === dbc.slug))
+                .map((dbc) => (
+                  <button
+                    key={dbc.id}
+                    onClick={() => setSelectedCommunityFilter(dbc.slug)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                      selectedCommunityFilter === dbc.slug
+                        ? 'bg-purple-600 text-white shadow'
+                        : 'bg-slate-900 border border-purple-500/40 text-purple-300 hover:text-white'
+                    }`}
+                  >
+                    <span>📁</span>
+                    <span>{dbc.name}</span>
+                  </button>
+                ))}
             </div>
 
             <div className="flex items-center gap-2">
               <button
-                onClick={() => openCreateModal('CUSTOM')}
-                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs shadow-lg transition flex items-center gap-1.5"
-                title="Create custom category like XYZ or new spec like GSM, Pic Type, GST"
+                onClick={() => setIsCommModalOpen(true)}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-lg transition flex items-center gap-1.5"
+                title="Create a new Community (e.g. Dipen, Rahul, Automobile)"
               >
-                <span>➕ Create Category / Spec (XYZ)</span>
+                <span>➕ Create Community / Category</span>
               </button>
               <button
-                onClick={() => openCreateModal('FABRIC')}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg transition flex items-center gap-2"
+                onClick={() => openCreateModal('CUSTOM')}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs shadow-lg transition flex items-center gap-1.5"
+                title="Create custom spec like GSM, Fabric, Size for selected community"
               >
-                <span>➕ Add New Option</span>
+                <span>➕ Create Spec Option (XYZ)</span>
               </button>
             </div>
           </div>
@@ -514,6 +571,121 @@ export function AdminCategoryRequestsPanel() {
               </div>
             </div>
           ))}
+
+          {/* Render Custom Dynamic Categories & Specification Groups Card */}
+          {(() => {
+            const standardTypeKeys = new Set(
+              COMMUNITY_SECTIONS.flatMap((comm) => comm.specs.map((s) => s.typeKey))
+            );
+            const customDbGroupKeys = Array.from(
+              new Set(
+                (requests || [])
+                  .map((r) => r.type)
+                  .filter((t) => t && !standardTypeKeys.has(t))
+              )
+            );
+
+            if (customDbGroupKeys.length === 0) return null;
+
+            return (
+              <div className="glass-card p-6 rounded-2xl border-amber-500/30 space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-800 flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl p-3 rounded-2xl bg-amber-950/60 border border-amber-500/30">✨</span>
+                    <div>
+                      <h3 className="font-extrabold text-lg text-amber-300">Custom Dynamic Categories & Specification Groups</h3>
+                      <p className="text-xs text-slate-400">
+                        Custom categories and attribute keys created dynamically (e.g. dipen, gsm, HARDWARE_BRAND, GOLD_KARAT).
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => openCreateModal('CUSTOM')}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold border border-amber-400/40 transition flex items-center gap-1.5"
+                  >
+                    <span>➕ Add Custom Category / Spec</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {customDbGroupKeys.map((typeKey) => {
+                    const dbRequests = (requests || []).filter(
+                      (r) => r.type === typeKey && r.status === 'APPROVED'
+                    );
+                    const values = dbRequests.map((r) => r.value);
+
+                    return (
+                      <div key={typeKey} className="bg-slate-900/80 p-4 rounded-xl border border-amber-500/30 space-y-3 flex flex-col justify-between hover:border-amber-400 transition">
+                        <div>
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-800/80 mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">✨</span>
+                              <h4 className="font-bold text-xs text-amber-200">{typeKey}</h4>
+                              <span className="text-[9px] font-mono font-bold text-amber-400 bg-amber-950 px-1.5 py-0.5 rounded">
+                                CUSTOM
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                setFormType(typeKey);
+                                openCreateModal(typeKey);
+                              }}
+                              className="text-slate-400 hover:text-emerald-400 text-xs font-bold"
+                              title={`Add option to ${typeKey}`}
+                            >
+                              ➕ Add
+                            </button>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5">
+                            {values.length === 0 ? (
+                              <span className="text-[11px] text-slate-500 italic">No sub-options defined yet.</span>
+                            ) : (
+                              values.map((val) => {
+                                const matchingReq = dbRequests.find(
+                                  (r) => r.value.trim().toLowerCase() === val.trim().toLowerCase()
+                                );
+
+                                return (
+                                  <div
+                                    key={val}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-950 border border-amber-500/40 text-amber-100 text-[11px] font-medium flex items-center gap-1.5 group hover:border-amber-400 transition"
+                                  >
+                                    <span>{val}</span>
+                                    <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
+                                      <button
+                                        onClick={() =>
+                                          matchingReq
+                                            ? openEditModal(matchingReq)
+                                            : openEditModal({ id: val, type: typeKey, value: val, status: 'APPROVED', createdAt: '' } as any)
+                                        }
+                                        className="text-slate-400 hover:text-indigo-400 text-[10px]"
+                                        title="Edit option"
+                                      >
+                                        ✏️
+                                      </button>
+                                      <button
+                                        onClick={() => handleDelete(matchingReq ? matchingReq.id : val, val)}
+                                        className="text-slate-400 hover:text-rose-400 text-[10px]"
+                                        title="Delete option"
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -758,6 +930,30 @@ export function AdminCategoryRequestsPanel() {
 
             <div className="space-y-4">
               <div>
+                <label className="block text-xs font-bold text-purple-400 mb-1.5">
+                  Select Community / Category Target
+                </label>
+                <select
+                  value={formCommunitySlug}
+                  onChange={(e) => setFormCommunitySlug(e.target.value)}
+                  className="w-full bg-slate-900 border border-purple-500/50 text-white rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-purple-500 font-bold"
+                >
+                  {COMMUNITY_SECTIONS.map((c) => (
+                    <option key={c.communityId} value={c.communityId}>
+                      {c.icon} {c.communityName} ({c.communityId})
+                    </option>
+                  ))}
+                  {(dbCommunities || [])
+                    .filter((dbc) => !COMMUNITY_SECTIONS.some((c) => c.communityId === dbc.slug))
+                    .map((dbc) => (
+                      <option key={dbc.slug} value={dbc.slug}>
+                        📁 {dbc.name} ({dbc.slug})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
                   Select Target Specification Group Key
                 </label>
@@ -797,11 +993,11 @@ export function AdminCategoryRequestsPanel() {
               {formType === 'CUSTOM' && (
                 <div>
                   <label className="block text-xs font-bold text-amber-400 mb-1">
-                    Enter Custom Group Key (e.g. HARDWARE_BRAND, GOLD_KARAT)
+                    Enter Custom Group Key (e.g. GSM, FABRIC, SIZE, MATERIAL)
                   </label>
                   <input
                     type="text"
-                    placeholder="E.g. CUSTOM_SPEC_KEY"
+                    placeholder="E.g. GSM, FABRIC, SIZE"
                     value={customTypeInput}
                     onChange={(e) => setCustomTypeInput(e.target.value.toUpperCase())}
                     className="w-full bg-slate-900 border border-amber-500/50 text-white rounded-xl px-3.5 py-2 text-xs focus:outline-none"
@@ -811,7 +1007,7 @@ export function AdminCategoryRequestsPanel() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  Sub-Option Value Text (e.g. 24K Pure Gold (999), 100% Combed Cotton, 5XL)
+                  Sub-Option Value Text (e.g. 300gsm, Cotton, S, Steel)
                 </label>
                 <input
                   type="text"
@@ -855,6 +1051,69 @@ export function AdminCategoryRequestsPanel() {
                     ? '💾 Save Option'
                     : '➕ Create Option Live'}
                 </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL FOR CREATING NEW COMMUNITY / CATEGORY */}
+      {isCommModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="glass-card max-w-md w-full p-6 rounded-2xl border-purple-500/40 space-y-5 bg-slate-950 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="font-extrabold text-base text-white flex items-center gap-2">
+                <span>➕ Create New Community / Category</span>
+              </h3>
+              <button
+                onClick={() => setIsCommModalOpen(false)}
+                className="text-slate-400 hover:text-white text-lg p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Community / Category Name (e.g. Dipen, Rahul, Footwear)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter Community Name..."
+                  value={commNameInput}
+                  onChange={(e) => setCommNameInput(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-purple-500 font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Description / Category Type (e.g. Clothing, Hardware, Industrial)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter Description..."
+                  value={commDescInput}
+                  onChange={(e) => setCommDescInput(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-300 rounded-xl px-3.5 py-2 text-xs focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setIsCommModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveCommunityModal}
+                disabled={isCreatingComm}
+                className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-extrabold shadow-lg transition"
+              >
+                <span>➕ Create Community Live</span>
               </button>
             </div>
           </div>
