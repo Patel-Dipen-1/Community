@@ -674,6 +674,29 @@ export class ProductService {
     return updated;
   }
 
+  private static async ensureValidUserId(userId?: string): Promise<string> {
+    if (userId) {
+      const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (existingUser) return existingUser.id;
+    }
+
+    const anyUser = await prisma.user.findFirst();
+    if (anyUser) return anyUser.id;
+
+    // Seed fallback Super Admin user if database is completely empty
+    const createdAdmin = await prisma.user.create({
+      data: {
+        fullName: 'Super Admin',
+        email: 'admin@platform.com',
+        mobileNumber: '9999999999',
+        isVerified: true,
+        status: 'APPROVED',
+      },
+    });
+
+    return createdAdmin.id;
+  }
+
   // Super Admin: Delete / Remove Category or Attribute Option
   static async deleteCategoryAttributeRequest(requestIdOrValue: string) {
     // Check if UUID ID matches
@@ -703,11 +726,11 @@ export class ProductService {
     }
 
     // Default option not yet in DB -> Insert as DELETED so getGlobalOptions excludes it
-    const adminUser = await prisma.user.findFirst();
+    const validUserId = await this.ensureValidUserId();
 
     const deleted = await prisma.categoryAttributeRequest.create({
       data: {
-        userId: adminUser?.id || 'system-admin',
+        userId: validUserId,
         type: 'ATTRIBUTE',
         value: requestIdOrValue,
         description: 'Option deleted by Super Admin',
@@ -778,21 +801,7 @@ export class ProductService {
     description?: string,
     communitySlug?: string
   ) {
-    let validUserId = userId;
-    if (!validUserId) {
-      const adminUser = await prisma.user.findFirst({ where: { status: 'APPROVED' } });
-      validUserId = adminUser?.id;
-    }
-
-    if (!validUserId) {
-      const anyUser = await prisma.user.findFirst();
-      validUserId = anyUser?.id;
-    }
-
-    if (!validUserId) {
-      throw new Error('SYSTEM_USER_MISSING: User record is required to create category options.');
-    }
-
+    const validUserId = await this.ensureValidUserId(userId);
     const cleanType = (type || 'ATTRIBUTE').trim().toUpperCase();
     const cleanValue = (value || '').trim();
     const cleanCommunitySlug = (communitySlug || 'global').trim().toLowerCase();
@@ -848,12 +857,12 @@ export class ProductService {
       });
     }
 
-    const adminUser = await prisma.user.findFirst();
+    const validUserId = await this.ensureValidUserId();
 
     // Soft delete old default value
     await prisma.categoryAttributeRequest.create({
       data: {
-        userId: adminUser?.id || 'system-admin',
+        userId: validUserId,
         communitySlug: communitySlug ? communitySlug.trim().toLowerCase() : 'global',
         type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
         value: idOrOldValue.trim(),
@@ -864,7 +873,7 @@ export class ProductService {
     // Create new approved replacement
     return await prisma.categoryAttributeRequest.create({
       data: {
-        userId: adminUser?.id || 'system-admin',
+        userId: validUserId,
         communitySlug: communitySlug ? communitySlug.trim().toLowerCase() : 'global',
         type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
         value: newValue.trim(),
