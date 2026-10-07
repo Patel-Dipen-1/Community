@@ -401,12 +401,21 @@ export function AdminCategoryRequestsPanel() {
               ))}
             </div>
 
-            <button
-              onClick={() => openCreateModal('FABRIC')}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg transition flex items-center gap-2"
-            >
-              <span>➕ Add New Option</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => openCreateModal('CUSTOM')}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs shadow-lg transition flex items-center gap-1.5"
+                title="Create custom category like XYZ or new spec like GSM, Pic Type, GST"
+              >
+                <span>➕ Create Category / Spec (XYZ)</span>
+              </button>
+              <button
+                onClick={() => openCreateModal('FABRIC')}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs shadow-lg transition flex items-center gap-2"
+              >
+                <span>➕ Add New Option</span>
+              </button>
+            </div>
           </div>
 
           {/* Render Community Accordion Cards */}
@@ -764,6 +773,23 @@ export function AdminCategoryRequestsPanel() {
                       </option>
                     ))
                   )}
+                  {(() => {
+                    const standardTypeKeys = new Set(
+                      COMMUNITY_SECTIONS.flatMap((comm) => comm.specs.map((s) => s.typeKey))
+                    );
+                    const customDbGroupKeys = Array.from(
+                      new Set(
+                        (requests || [])
+                          .map((r) => r.type)
+                          .filter((t) => t && !standardTypeKeys.has(t))
+                      )
+                    );
+                    return customDbGroupKeys.map((typeKey) => (
+                      <option key={typeKey} value={typeKey}>
+                        ✨ Custom Group: {typeKey}
+                      </option>
+                    ));
+                  })()}
                   <option value="CUSTOM">➕ Create Custom Specification Group Title...</option>
                 </select>
               </div>

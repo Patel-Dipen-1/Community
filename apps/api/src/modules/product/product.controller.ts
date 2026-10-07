@@ -198,7 +198,7 @@ export class ProductController {
   static async createAdminCategoryOption(req: Request, res: Response) {
     try {
       const { type, value, description } = req.body;
-      const userId = (req as any).user.id;
+      const userId = (req as any).user?.userId || (req as any).user?.id;
       const option = await ProductService.createAdminCategoryAttributeOption(userId, type, value, description);
       clearCacheByPattern('/products');
       res.status(201).json({

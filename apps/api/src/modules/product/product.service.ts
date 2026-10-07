@@ -719,23 +719,41 @@ export class ProductService {
   }
 
   // Super Admin: Create new category/attribute option directly
-  static async createAdminCategoryAttributeOption(userId: string, type: string, value: string, description?: string) {
+  static async createAdminCategoryAttributeOption(userId?: string, type?: string, value?: string, description?: string) {
+    let validUserId = userId;
+    if (!validUserId) {
+      const adminUser = await prisma.user.findFirst({ where: { status: 'APPROVED' } });
+      validUserId = adminUser?.id;
+    }
+
+    if (!validUserId) {
+      const anyUser = await prisma.user.findFirst();
+      validUserId = anyUser?.id;
+    }
+
+    if (!validUserId) {
+      throw new Error('SYSTEM_USER_MISSING: User record is required to create category options.');
+    }
+
+    const cleanType = (type || 'ATTRIBUTE').trim().toUpperCase();
+    const cleanValue = (value || '').trim();
+
     const existing = await prisma.categoryAttributeRequest.findFirst({
-      where: { type, value: { equals: value.trim(), mode: 'insensitive' } },
+      where: { type: cleanType, value: { equals: cleanValue, mode: 'insensitive' } },
     });
 
     if (existing) {
       return await prisma.categoryAttributeRequest.update({
         where: { id: existing.id },
-        data: { status: 'APPROVED', value: value.trim(), description: description || null },
+        data: { status: 'APPROVED', value: cleanValue, description: description || null },
       });
     }
 
     return await prisma.categoryAttributeRequest.create({
       data: {
-        userId,
-        type: type.trim().toUpperCase(),
-        value: value.trim(),
+        userId: validUserId,
+        type: cleanType,
+        value: cleanValue,
         description: description || null,
         status: 'APPROVED',
       },

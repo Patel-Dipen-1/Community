@@ -20,6 +20,7 @@ import {
   useCreateProductMutation,
   useUpdateProductMutation,
   useGetGlobalOptionsQuery,
+  useGetDynamicSchemaQuery,
   useSubmitCategoryRequestMutation,
 } from '../store/api/productApi';
 import { ENV_CONFIG } from '../constants/config';
@@ -80,6 +81,7 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
   const [createProduct, { isLoading: isCreating }] = useCreateProductMutation();
   const [updateProduct, { isLoading: isUpdating }] = useUpdateProductMutation();
   const { data: globalOptions } = useGetGlobalOptionsQuery();
+  const { data: dynamicSchemaData } = useGetDynamicSchemaQuery();
   const [submitCategoryRequest, { isLoading: isSubmittingRequest }] = useSubmitCategoryRequestMutation();
 
   // Active Community Tab State
@@ -242,23 +244,21 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
         ['clothing', 'hardware', 'jewellery', 'electronics', 'grocery']
       ).map((s: string) => String(s).toLowerCase());
 
+      const getFirstCategoryForCommunity = (commSlug: string) => {
+        if (commSlug === 'hardware') return hardwareCategories[0] || 'General';
+        if (commSlug === 'jewellery') return jewelleryCategories[0] || 'General';
+        if (commSlug === 'electronics') return electronicsCategories[0] || 'General';
+        if (commSlug === 'grocery') return groceryCategories[0] || 'General';
+        return clothingCategories[0] || 'General';
+      };
+
       const defaultComm = allowedList[0] || 'clothing';
       setActiveCommunity(defaultComm);
       setTitle('');
       setCode(`SKU-B2B-${Math.floor(100 + Math.random() * 900)}`);
       setDescription('');
       setMoq('20');
-      setCategory(
-        defaultComm === 'hardware'
-          ? 'Power Tools'
-          : defaultComm === 'jewellery'
-          ? 'Gold Jewellery'
-          : defaultComm === 'electronics'
-          ? 'Smartphones & Accessories'
-          : defaultComm === 'grocery'
-          ? 'Spices & Masala'
-          : 'Ethnic & Kurtis'
-      );
+      setCategory(getFirstCategoryForCommunity(defaultComm));
       setFabric('100% Combed Cotton');
       setSelectedSizes(['M', 'L', 'XL']);
       setGender('Women');
