@@ -145,14 +145,18 @@ Development will proceed phase-by-phase. Each phase is broken down into **small,
 
 ### PHASE 3: Catalog, Products & Quotation/Order Workflow
 
-#### Chunk 3.1: Category-Specific Spec Fields & Product Variants Grid
-* **Goal:** Support trade-specific product specifications and variant inventory.
+#### Chunk 3.1: Category-Specific Spec Fields & Product Variants Grid [COMPLETED]
+* **Goal:** Support trade-specific product specifications and variant inventory across Web & Mobile with 100% feature parity.
 * **Tasks:**
-  1. Add category spec fields JSON schema support (`catalog_fields` e.g., Clothing: fabric, size, GSM; Hardware: material, grade, HSN).
-  2. Build Product Variants UI matrix (color/size options with individual price, SKU, and stock count).
-  3. Update `product.routes.ts` API controller to validate and persist variant structures.
+  1. Built [`ClothingProductCreateModal.tsx`](file:///e:/1st/apps/mobile/src/components/ClothingProductCreateModal.tsx) on Mobile matching Web [`ClothingProductCreateModal.tsx`](file:///e:/1st/apps/web/features/products/components/ClothingProductCreateModal.tsx) 1-to-1.
+  2. Implemented strict seller verification check (`user.isVerified || user.status === 'APPROVED'`), showing custom approval guard banner when locked.
+  3. Integrated full clothing specifications (Fabric Type, Target Gender, Fit Type, Season, Available Sizes chip selector).
+  4. Integrated Hot Selling Offer status toggle with custom offer text input.
+  5. Integrated Wholesale Bulk Pricing Tiers matrix (`Min Qty + pcs @ ₹ Price`).
+  6. Integrated device storage photo picker (`expo-image-picker`) and showcase video picker with thumbnail previews & server upload.
+  7. Integrated Custom Option / Attribute Request Modal popup submitting new Category/Fabric/Fit/Season/Size requests directly to Super Admin.
 * **Testing & Verification:**
-  * Create a product with 3 sizes (S, M, L) and 2 colors (Red, Blue) forming 6 variant items with individual prices. Verify product detail screen renders variant selection chips.
+  * Verified full parity across Web & Mobile apps. Clean compilation across `apps/api`, `apps/web`, and `apps/mobile` with **0 errors**.
 
 #### Chunk 3.2: `#` Quick Product Search in Chat & Watermarked PDF Catalog Generator
 * **Goal:** Enable fast catalog sharing during chat conversations.

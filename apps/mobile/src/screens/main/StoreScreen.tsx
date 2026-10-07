@@ -22,6 +22,7 @@ import { Button } from '../../components/common/Button';
 import { EmptyState } from '../../components/common/EmptyState';
 import { useGetMyStoreQuery, useGetStoreByIdQuery, useUpdateStoreMutation } from '../../store/api/storeApi';
 import { useCreateProductMutation, useDeleteProductMutation } from '../../store/api/productApi';
+import { ClothingProductCreateModal } from '../../components/ClothingProductCreateModal';
 import { ENV_CONFIG } from '../../constants/config';
 import { authStorage } from '../../services/storage/authStorage';
 import { useAppSelector } from '../../hooks/useRedux';
@@ -524,50 +525,13 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
       </Modal>
 
       {/* ============================================================ */}
-      {/* MODAL 2: ADD PRODUCT (WITH LOCAL IMAGE UPLOAD) */}
+      {/* MODAL 2: ADD CLOTHING PRODUCT (FULL WEB PARITY) */}
       {/* ============================================================ */}
-      <Modal visible={addProductModalOpen} animationType="slide" transparent>
-        <View style={styles.modalBg}>
-          <ScrollView contentContainerStyle={styles.modalScroll}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitleBlue}>📦 Add New Product (Pick from Storage)</Text>
-
-              <Input label="Product Title *" placeholder="e.g. 60s Combed Cotton Fabric" value={prodTitle} onChangeText={setProdTitle} />
-              <Input label="SKU Code *" placeholder="e.g. SKU-FAB-102" value={prodCode} onChangeText={setProdCode} />
-              <Input label="Wholesale Price (₹) *" placeholder="e.g. 185" keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
-              <Input label="MOQ (Units) *" placeholder="e.g. 100" keyboardType="numeric" value={prodMoq} onChangeText={setProdMoq} />
-              <Input label="Category" placeholder="e.g. Clothing & Textiles" value={prodCategory} onChangeText={setProdCategory} />
-              <Input label="Description" placeholder="Fabric details, terms..." value={prodDesc} onChangeText={setProdDesc} multiline numberOfLines={3} />
-
-              {/* Local Storage Product Image Picker */}
-              <View style={styles.pickerSection}>
-                <Text style={styles.pickerLabel}>Product Photo (Local Device)</Text>
-                {prodImageUri ? (
-                  <Image source={{ uri: prodImageUri }} style={styles.pickerPreviewBanner} />
-                ) : null}
-                <TouchableOpacity
-                  style={styles.pickImageBtn}
-                  onPress={() => handlePickLocalImage(setProdImageUri)}
-                >
-                  <Text style={styles.pickImageBtnText}>📸 Pick Product Photo from Phone Storage</Text>
-                </TouchableOpacity>
-              </View>
-
-              {isUploadingImage && (
-                <View style={styles.uploadingRow}>
-                  <ActivityIndicator size="small" color="#818cf8" />
-                  <Text style={styles.uploadingText}>Uploading photo from device...</Text>
-                </View>
-              )}
-
-              <View style={styles.modalActions}>
-                <Button title="Cancel" variant="secondary" onPress={() => setAddProductModalOpen(false)} style={{ flex: 1 }} />
-                <Button title="Publish Product" loading={isCreatingProduct} onPress={handleCreateProduct} style={{ flex: 1 }} />
-              </View>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+      <ClothingProductCreateModal
+        isOpen={addProductModalOpen}
+        onClose={() => setAddProductModalOpen(false)}
+        onSuccess={() => refetchMyStore()}
+      />
 
       {/* ============================================================ */}
       {/* MODAL 3: SELECTED PRODUCT DETAIL PREVIEW */}

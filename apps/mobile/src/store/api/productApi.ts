@@ -80,6 +80,28 @@ export const productApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ['Products', 'Store'],
     }),
+
+    getGlobalOptions: builder.query<{
+      categories: string[];
+      fabrics: string[];
+      sizes: string[];
+      genders: string[];
+      fitTypes: string[];
+      seasons: string[];
+      patterns: string[];
+    }, void>({
+      query: () => '/products/options',
+      providesTags: ['Products'],
+    }),
+
+    submitCategoryRequest: builder.mutation<{ message: string; request: any }, { type: string; value: string; description?: string }>({
+      query: (body) => ({
+        url: '/products/category-requests',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Products'],
+    }),
   }),
 });
 
@@ -89,4 +111,6 @@ export const {
   useCreateProductMutation,
   useUpdateProductMutation,
   useDeleteProductMutation,
+  useGetGlobalOptionsQuery,
+  useSubmitCategoryRequestMutation,
 } = productApi;
