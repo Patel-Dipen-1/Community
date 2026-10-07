@@ -559,17 +559,34 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
     }
   };
 
-  // Get active category options array
-  const currentCategoryList =
-    activeCommunity === 'hardware'
-      ? hardwareCategories
-      : activeCommunity === 'jewellery'
-      ? jewelleryCategories
-      : activeCommunity === 'electronics'
-      ? electronicsCategories
-      : activeCommunity === 'grocery'
-      ? groceryCategories
-      : clothingCategories;
+  const userAllowedCommunities: string[] = (
+    user?.business?.allowedCommunities ||
+    (user as any)?.allowedCommunities ||
+    []
+  ).map((s: string) => String(s).toLowerCase());
+
+  const communitiesList = dynamicSchemaData?.communities?.length
+    ? dynamicSchemaData.communities
+    : COMMUNITIES;
+
+  const visibleComms =
+    userAllowedCommunities.length > 0 && !userAllowedCommunities.includes('*')
+      ? communitiesList.filter((c: any) =>
+          userAllowedCommunities.includes((c.id || c.slug).toLowerCase())
+        )
+      : communitiesList;
+
+  const displayCommunities = visibleComms.length > 0 ? visibleComms : communitiesList;
+  const currentComm =
+    displayCommunities.find((c: any) => (c.id || c.slug) === activeCommunity) || displayCommunities[0];
+
+  const currentCategoryList = Array.from(
+    new Set([
+      ...(currentComm?.categories || []).map((cat: any) => (typeof cat === 'string' ? cat : cat.name)),
+      ...(customOptionsMap[`CATEGORY_${activeCommunity.toUpperCase()}`] || []),
+      ...(customOptionsMap['CATEGORY'] || []),
+    ])
+  );
 
   return (
     <Modal visible={isOpen} animationType="slide" transparent onRequestClose={onClose}>
@@ -636,38 +653,30 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
               {/* 1. INDUSTRY COMMUNITY SELECTOR */}
               <Text style={styles.sectionLabel}>Select Target Industry Community *</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                {(() => {
-                  const allowedList: string[] = (
-                    user?.business?.allowedCommunities ||
-                    (user as any)?.allowedCommunities ||
-                    ['clothing', 'hardware', 'jewellery', 'electronics', 'grocery']
-                  ).map((s: string) => String(s).toLowerCase());
+                {displayCommunities.map((c: any) => {
+                  const commId = c.id || c.slug;
+                  const commName = c.name || c.label || commId;
+                  const commIcon = c.icon || '📦';
+                  const isActive = activeCommunity === commId;
 
-                  const visibleComms = COMMUNITIES.filter((c) =>
-                    allowedList.includes(c.id.toLowerCase())
-                  );
-
-                  const displayComms = visibleComms.length > 0 ? visibleComms : COMMUNITIES;
-
-                  return displayComms.map((c) => (
+                  return (
                     <TouchableOpacity
-                      key={c.id}
+                      key={commId}
                       onPress={() => {
-                        setActiveCommunity(c.id);
-                        if (c.id === 'clothing') setCategory('Ethnic & Kurtis');
-                        else if (c.id === 'hardware') setCategory('Power Tools');
-                        else if (c.id === 'jewellery') setCategory('Gold Jewellery');
-                        else if (c.id === 'electronics') setCategory('Smartphones & Accessories');
-                        else if (c.id === 'grocery') setCategory('Spices & Masala');
+                        setActiveCommunity(commId);
+                        const firstCat =
+                          c.categories?.[0]?.name ||
+                          (typeof c.categories?.[0] === 'string' ? c.categories[0] : 'General');
+                        setCategory(firstCat);
                       }}
-                      style={[styles.commTab, activeCommunity === c.id && styles.commTabActive]}
+                      style={[styles.commTab, isActive && styles.commTabActive]}
                     >
-                      <Text style={[styles.commTabText, activeCommunity === c.id && styles.commTabTextActive]}>
-                        {c.name}
+                      <Text style={[styles.commTabText, isActive && styles.commTabTextActive]}>
+                        {commIcon} {commName}
                       </Text>
                     </TouchableOpacity>
-                  ));
-                })()}
+                  );
+                })}
               </ScrollView>
 
               {/* 2. UNIVERSAL COMMON BRACKET FIELDS */}

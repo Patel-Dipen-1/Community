@@ -129,9 +129,7 @@ export function AdminCategoryRequestsPanel() {
   const [deleteCommunity] = useDeleteCommunityMutation();
 
   // Redux RTK Queries & Mutations
-  const { data: requests, isLoading: isRequestsLoading, refetch: refetchRequests } = useGetCategoryRequestsQuery(
-    statusFilter === 'ALL' ? undefined : { status: statusFilter }
-  );
+  const { data: requests, isLoading: isRequestsLoading, refetch: refetchRequests } = useGetCategoryRequestsQuery();
   const { data: globalOptions, refetch: refetchGlobalOptions } = useGetGlobalOptionsQuery();
 
   const [approveRequest, { isLoading: isApproving }] = useApproveCategoryRequestMutation();
@@ -148,6 +146,7 @@ export function AdminCategoryRequestsPanel() {
   const handleRefetchAll = () => {
     refetchRequests();
     refetchGlobalOptions();
+    refetchCommunities();
   };
 
   const openApproveModal = (req: CategoryRequestData) => {
@@ -166,6 +165,7 @@ export function AdminCategoryRequestsPanel() {
     setCustomTypeInput('');
     setFormValue(req.value);
     setFormDescription(req.description || '');
+    setFormCommunitySlug(req.communitySlug || 'clothing');
     setModalMode('EDIT');
     setIsModalOpen(true);
   };
@@ -282,6 +282,7 @@ export function AdminCategoryRequestsPanel() {
   };
 
   const filteredRequests = (requests || []).filter((r) => {
+    if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -353,7 +354,20 @@ export function AdminCategoryRequestsPanel() {
     }
   };
 
-  const visibleCommunities = COMMUNITY_SECTIONS.filter(
+  const allDynamicCommunitiesList = [
+    ...COMMUNITY_SECTIONS,
+    ...(dbCommunities || [])
+      .filter((dbc) => !COMMUNITY_SECTIONS.some((c) => c.communityId === dbc.slug))
+      .map((dbc) => ({
+        communityId: dbc.slug,
+        communityName: `📁 ${dbc.name} Community`,
+        icon: '📁',
+        description: dbc.description || `Dynamic trade category and custom specifications for ${dbc.name}`,
+        specs: [],
+      })),
+  ];
+
+  const visibleCommunities = allDynamicCommunitiesList.filter(
     (c) => selectedCommunityFilter === 'ALL' || c.communityId === selectedCommunityFilter
   );
 
@@ -468,7 +482,7 @@ export function AdminCategoryRequestsPanel() {
               <button
                 onClick={() => openCreateModal('CUSTOM')}
                 className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs shadow-lg transition flex items-center gap-1.5"
-                title="Create custom spec like GSM, Fabric, Size for selected community"
+                title="Create custom spec option"
               >
                 <span>➕ Create Spec Option (XYZ)</span>
               </button>
@@ -476,216 +490,153 @@ export function AdminCategoryRequestsPanel() {
           </div>
 
           {/* Render Community Accordion Cards */}
-          {visibleCommunities.map((comm) => (
-            <div key={comm.communityId} className="glass-card p-6 rounded-2xl border-slate-800 space-y-6">
-              {/* Community Card Header */}
-              <div className="flex items-center justify-between pb-4 border-b border-slate-800 flex-wrap gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl p-3 rounded-2xl bg-slate-900 border border-slate-800">{comm.icon}</span>
-                  <div>
-                    <h3 className="font-extrabold text-lg text-white">{comm.communityName}</h3>
-                    <p className="text-xs text-slate-400">{comm.description}</p>
-                  </div>
-                </div>
+          {visibleCommunities.map((comm) => {
+            // Find static specs + custom dynamic spec keys created for this community
+            const commApprovedRequests = (requests || []).filter((r) => {
+              if (r.status !== 'APPROVED') return false;
 
-                <button
-                  onClick={() => openCreateModal(comm.specs[0]?.typeKey || 'FABRIC')}
-                  className="px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white text-xs font-bold border border-indigo-500/40 transition flex items-center gap-1.5"
-                >
-                  <span>➕ Add {comm.communityName.split(' ')[1]} Option</span>
-                </button>
-              </div>
+              const commIdLower = comm.communityId.toLowerCase();
+              const reqCommLower = (r.communitySlug || '').toLowerCase();
+              const reqTypeLower = (r.type || '').toLowerCase();
 
-              {/* Grid of Specification Attributes inside this Community */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {comm.specs.map((spec) => {
-                  const values = getGlobalValuesForGroup(spec.typeKey);
-                  const dbRequests = (requests || []).filter(
-                    (r) => r.type === spec.typeKey && r.status === 'APPROVED'
-                  );
+              // 1. Explicitly tagged to this community (e.g. communitySlug === 'xyz' or 'clothing')
+              if (reqCommLower && reqCommLower === commIdLower) return true;
 
-                  return (
-                    <div key={spec.typeKey} className="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between hover:border-slate-700 transition">
-                      <div>
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-800/80 mb-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-base">{spec.icon}</span>
-                            <h4 className="font-bold text-xs text-white">{spec.label}</h4>
-                            <span className="text-[9px] font-mono font-bold text-indigo-400 bg-indigo-950 px-1.5 py-0.5 rounded">
-                              {spec.typeKey}
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => openCreateModal(spec.typeKey)}
-                            className="text-slate-400 hover:text-emerald-400 text-xs font-bold"
-                            title={`Add option to ${spec.label}`}
-                          >
-                            ➕ Add
-                          </button>
-                        </div>
+              // 2. Type matches community slug (e.g. type === 'XYZ' or 'CATEGORY_XYZ')
+              if (reqTypeLower === commIdLower || reqTypeLower === `category_${commIdLower}`) return true;
 
-                        <div className="flex flex-wrap gap-1.5">
-                          {values.length === 0 ? (
-                            <span className="text-[11px] text-slate-500 italic">No options defined yet.</span>
-                          ) : (
-                            values.map((val) => {
-                              const matchingReq = dbRequests.find(
-                                (r) => r.value.trim().toLowerCase() === val.trim().toLowerCase()
-                              );
+              // 3. Static spec type key belonging to standard community with global/null communitySlug
+              if (!reqCommLower && comm.specs.some((s) => s.typeKey.toLowerCase() === reqTypeLower)) return true;
 
-                              return (
-                                <div
-                                  key={val}
-                                  className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700/80 text-slate-200 text-[11px] font-medium flex items-center gap-1.5 group hover:border-indigo-500 transition"
-                                >
-                                  <span>{val}</span>
-                                  <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
-                                    <button
-                                      onClick={() =>
-                                        matchingReq
-                                          ? openEditModal(matchingReq)
-                                          : openEditModal({ id: val, type: spec.typeKey, value: val, status: 'APPROVED', createdAt: '' } as any)
-                                      }
-                                      className="text-slate-400 hover:text-indigo-400 text-[10px]"
-                                      title="Edit option"
-                                    >
-                                      ✏️
-                                    </button>
-                                    <button
-                                      onClick={() => handleDelete(matchingReq ? matchingReq.id : val, val)}
-                                      className="text-slate-400 hover:text-rose-400 text-[10px]"
-                                      title="Delete option"
-                                    >
-                                      🗑️
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+              return false;
+            });
 
-          {/* Render Custom Dynamic Categories & Specification Groups Card */}
-          {(() => {
-            const standardTypeKeys = new Set(
-              COMMUNITY_SECTIONS.flatMap((comm) => comm.specs.map((s) => s.typeKey))
-            );
-            const customDbGroupKeys = Array.from(
-              new Set(
-                (requests || [])
-                  .map((r) => r.type)
-                  .filter((t) => t && !standardTypeKeys.has(t))
-              )
-            );
+            const dynamicSpecKeys = Array.from(new Set(commApprovedRequests.map((r) => r.type.toUpperCase())));
 
-            if (customDbGroupKeys.length === 0) return null;
+            const allSpecsForComm: SpecDef[] = [
+              ...comm.specs,
+              ...dynamicSpecKeys
+                .filter((key) => !comm.specs.some((s) => s.typeKey.toUpperCase() === key))
+                .map((key) => ({
+                  typeKey: key,
+                  label: key.replace(/_/g, ' '),
+                  icon: '✨',
+                })),
+            ];
 
             return (
-              <div className="glass-card p-6 rounded-2xl border-amber-500/30 space-y-6">
+              <div key={comm.communityId} className="glass-card p-6 rounded-2xl border-slate-800 space-y-6">
+                {/* Community Card Header */}
                 <div className="flex items-center justify-between pb-4 border-b border-slate-800 flex-wrap gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="text-3xl p-3 rounded-2xl bg-amber-950/60 border border-amber-500/30">✨</span>
+                    <span className="text-3xl p-3 rounded-2xl bg-slate-900 border border-slate-800">{comm.icon}</span>
                     <div>
-                      <h3 className="font-extrabold text-lg text-amber-300">Custom Dynamic Categories & Specification Groups</h3>
-                      <p className="text-xs text-slate-400">
-                        Custom categories and attribute keys created dynamically (e.g. dipen, gsm, HARDWARE_BRAND, GOLD_KARAT).
-                      </p>
+                      <h3 className="font-extrabold text-lg text-white">{comm.communityName}</h3>
+                      <p className="text-xs text-slate-400">{comm.description}</p>
                     </div>
                   </div>
 
                   <button
-                    onClick={() => openCreateModal('CUSTOM')}
-                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold border border-amber-400/40 transition flex items-center gap-1.5"
+                    onClick={() => openCreateModal('CUSTOM', comm.communityId)}
+                    className="px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white text-xs font-bold border border-indigo-500/40 transition flex items-center gap-1.5"
                   >
-                    <span>➕ Add Custom Category / Spec</span>
+                    <span>➕ Add Spec / Option for {comm.communityName.split(' ')[1] || comm.communityId}</span>
                   </button>
                 </div>
 
+                {/* Grid of Specification Attributes inside this Community */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {customDbGroupKeys.map((typeKey) => {
-                    const dbRequests = (requests || []).filter(
-                      (r) => r.type === typeKey && r.status === 'APPROVED'
-                    );
-                    const values = dbRequests.map((r) => r.value);
+                  {allSpecsForComm.length === 0 ? (
+                    <div className="col-span-full p-6 text-center text-slate-500 text-xs italic bg-slate-900/50 rounded-xl border border-slate-800 flex flex-col items-center justify-center gap-2">
+                      <span>No specification options defined for {comm.communityName} yet.</span>
+                      <button
+                        onClick={() => openCreateModal('CUSTOM', comm.communityId)}
+                        className="mt-1 px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow transition"
+                      >
+                        ➕ Add First Specification (e.g. GSM, Fabric, Size)
+                      </button>
+                    </div>
+                  ) : (
+                    allSpecsForComm.map((spec) => {
+                      const staticValues = getGlobalValuesForGroup(spec.typeKey);
+                      const specApprovedReqs = commApprovedRequests.filter(
+                        (r) => r.type.toUpperCase() === spec.typeKey.toUpperCase()
+                      );
+                      const dbValues = specApprovedReqs.map((r) => r.value);
 
-                    return (
-                      <div key={typeKey} className="bg-slate-900/80 p-4 rounded-xl border border-amber-500/30 space-y-3 flex flex-col justify-between hover:border-amber-400 transition">
-                        <div>
-                          <div className="flex items-center justify-between pb-2 border-b border-slate-800/80 mb-3">
-                            <div className="flex items-center gap-2">
-                              <span className="text-base">✨</span>
-                              <h4 className="font-bold text-xs text-amber-200">{typeKey}</h4>
-                              <span className="text-[9px] font-mono font-bold text-amber-400 bg-amber-950 px-1.5 py-0.5 rounded">
-                                CUSTOM
-                              </span>
+                      const allValues = Array.from(new Set([...staticValues, ...dbValues]));
+
+                      return (
+                        <div key={spec.typeKey} className="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-3 flex flex-col justify-between hover:border-slate-700 transition">
+                          <div>
+                            <div className="flex items-center justify-between pb-2 border-b border-slate-800/80 mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{spec.icon}</span>
+                                <h4 className="font-bold text-xs text-white">{spec.label}</h4>
+                                <span className="text-[9px] font-mono font-bold text-indigo-400 bg-indigo-950 px-1.5 py-0.5 rounded">
+                                  {spec.typeKey}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => openCreateModal(spec.typeKey, comm.communityId)}
+                                className="text-slate-400 hover:text-emerald-400 text-xs font-bold"
+                                title={`Add option to ${spec.label}`}
+                              >
+                                ➕ Add
+                              </button>
                             </div>
-                            <button
-                              onClick={() => {
-                                setFormType(typeKey);
-                                openCreateModal(typeKey);
-                              }}
-                              className="text-slate-400 hover:text-emerald-400 text-xs font-bold"
-                              title={`Add option to ${typeKey}`}
-                            >
-                              ➕ Add
-                            </button>
-                          </div>
 
-                          <div className="flex flex-wrap gap-1.5">
-                            {values.length === 0 ? (
-                              <span className="text-[11px] text-slate-500 italic">No sub-options defined yet.</span>
-                            ) : (
-                              values.map((val) => {
-                                const matchingReq = dbRequests.find(
-                                  (r) => r.value.trim().toLowerCase() === val.trim().toLowerCase()
-                                );
+                            <div className="flex flex-wrap gap-1.5">
+                              {allValues.length === 0 ? (
+                                <span className="text-[11px] text-slate-500 italic">No options defined yet.</span>
+                              ) : (
+                                allValues.map((val) => {
+                                  const matchingReq = specApprovedReqs.find(
+                                    (r) => r.value.trim().toLowerCase() === val.trim().toLowerCase()
+                                  ) || (requests || []).find(
+                                    (r) => r.type === spec.typeKey && r.value.trim().toLowerCase() === val.trim().toLowerCase()
+                                  );
 
-                                return (
-                                  <div
-                                    key={val}
-                                    className="px-2.5 py-1 rounded-lg bg-slate-950 border border-amber-500/40 text-amber-100 text-[11px] font-medium flex items-center gap-1.5 group hover:border-amber-400 transition"
-                                  >
-                                    <span>{val}</span>
-                                    <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
-                                      <button
-                                        onClick={() =>
-                                          matchingReq
-                                            ? openEditModal(matchingReq)
-                                            : openEditModal({ id: val, type: typeKey, value: val, status: 'APPROVED', createdAt: '' } as any)
-                                        }
-                                        className="text-slate-400 hover:text-indigo-400 text-[10px]"
-                                        title="Edit option"
-                                      >
-                                        ✏️
-                                      </button>
-                                      <button
-                                        onClick={() => handleDelete(matchingReq ? matchingReq.id : val, val)}
-                                        className="text-slate-400 hover:text-rose-400 text-[10px]"
-                                        title="Delete option"
-                                      >
-                                        🗑️
-                                      </button>
+                                  return (
+                                    <div
+                                      key={val}
+                                      className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700/80 text-slate-200 text-[11px] font-medium flex items-center gap-1.5 group hover:border-indigo-500 transition"
+                                    >
+                                      <span>{val}</span>
+                                      <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100">
+                                        <button
+                                          onClick={() =>
+                                            matchingReq
+                                              ? openEditModal(matchingReq)
+                                              : openEditModal({ id: val, type: spec.typeKey, value: val, status: 'APPROVED', createdAt: '' } as any)
+                                          }
+                                          className="text-slate-400 hover:text-indigo-400 text-[10px]"
+                                          title="Edit option"
+                                        >
+                                          ✏️
+                                        </button>
+                                        <button
+                                          onClick={() => handleDelete(matchingReq ? matchingReq.id : val, val)}
+                                          className="text-slate-400 hover:text-rose-400 text-[10px]"
+                                          title="Delete option"
+                                        >
+                                          🗑️
+                                        </button>
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              })
-                            )}
+                                  );
+                                })
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             );
-          })()}
+          })}
         </div>
       )}
 

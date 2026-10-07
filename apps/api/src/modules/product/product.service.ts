@@ -3,19 +3,28 @@ import { prisma } from '@b2b/database';
 export class ProductService {
   // Helper to ensure a community exists for product relation
   private static async getOrCreateCommunity(communityIdOrSlug: string) {
-    const slug = communityIdOrSlug.toLowerCase().includes('jewel') ? 'jewellery' : 'clothing';
+    const cleanInput = (communityIdOrSlug || 'clothing').trim();
+    const slug = cleanInput.toLowerCase().replace(/[^a-z0-9]/g, '-');
+
     let community = await prisma.community.findFirst({
       where: {
-        OR: [{ id: communityIdOrSlug }, { slug }],
+        OR: [{ id: cleanInput }, { slug }],
       },
     });
 
     if (!community) {
+      let name = cleanInput;
+      if (slug === 'clothing') name = 'Clothing & Textiles';
+      else if (slug === 'jewellery') name = 'Jewellery & Gems';
+      else if (slug === 'hardware') name = 'Hardware & Industrial Tools';
+      else if (slug === 'electronics') name = 'Electronics & Electricals';
+      else if (slug === 'grocery') name = 'Grocery & FMCG Staples';
+
       community = await prisma.community.create({
         data: {
           slug,
-          name: slug === 'clothing' ? 'Clothing & Textiles' : 'Jewellery & Gems',
-          description: `Verified B2B Community for ${slug}`,
+          name,
+          description: `Verified B2B Community for ${name}`,
         },
       });
     }
@@ -487,15 +496,18 @@ export class ProductService {
       where: { status: 'APPROVED' },
     });
 
-    const customTypesSet = new Set(dbRequests.map((r) => r.type));
+    const dbCommunities = await prisma.community.findMany({
+      where: { isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
 
-    const communities = [
-      {
+    const communitiesMap: Record<string, any> = {
+      clothing: {
         id: 'clothing',
         name: 'Clothing & Textiles Community',
         slug: 'clothing',
         icon: '👕',
-        categories: (globalOptions.clothingCategories || []).map((name) => ({
+        categories: (globalOptions.clothingCategories || []).map((name: string) => ({
           id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
           name,
           slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
@@ -509,12 +521,12 @@ export class ProductService {
           { key: 'PATTERN', label: 'Patterns & Work', inputType: 'SELECT', options: globalOptions.patterns || [] },
         ],
       },
-      {
+      jewellery: {
         id: 'jewellery',
         name: 'Jewellery & Gems Community',
         slug: 'jewellery',
         icon: '💎',
-        categories: (globalOptions.jewelleryCategories || []).map((name) => ({
+        categories: (globalOptions.jewelleryCategories || []).map((name: string) => ({
           id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
           name,
           slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
@@ -525,12 +537,12 @@ export class ProductService {
           { key: 'JEWELLERY_CERT', label: 'Certifications', inputType: 'SELECT', options: globalOptions.jewelleryCertifications || [] },
         ],
       },
-      {
+      hardware: {
         id: 'hardware',
         name: 'Hardware & Industrial Tools',
         slug: 'hardware',
         icon: '🔧',
-        categories: (globalOptions.hardwareCategories || []).map((name) => ({
+        categories: (globalOptions.hardwareCategories || []).map((name: string) => ({
           id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
           name,
           slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
@@ -543,12 +555,12 @@ export class ProductService {
           { key: 'HARDWARE_APPLICATION', label: 'Application', inputType: 'SELECT', options: globalOptions.hardwareApplications || [] },
         ],
       },
-      {
+      electronics: {
         id: 'electronics',
         name: 'Electronics & Electricals',
         slug: 'electronics',
         icon: '⚡',
-        categories: (globalOptions.electronicsCategories || []).map((name) => ({
+        categories: (globalOptions.electronicsCategories || []).map((name: string) => ({
           id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
           name,
           slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
@@ -559,12 +571,12 @@ export class ProductService {
           { key: 'ELEC_WARRANTY', label: 'Warranty Period', inputType: 'SELECT', options: globalOptions.electronicsWarranties || [] },
         ],
       },
-      {
+      grocery: {
         id: 'grocery',
         name: 'Grocery & FMCG Staples',
         slug: 'grocery',
         icon: '🌾',
-        categories: (globalOptions.groceryCategories || []).map((name) => ({
+        categories: (globalOptions.groceryCategories || []).map((name: string) => ({
           id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
           name,
           slug: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
@@ -575,7 +587,22 @@ export class ProductService {
           { key: 'GROCERY_CERT', label: 'Certification', inputType: 'SELECT', options: globalOptions.groceryCertifications || [] },
         ],
       },
-    ];
+    };
+
+    // Include custom database communities
+    dbCommunities.forEach((c) => {
+      const slug = c.slug.toLowerCase();
+      if (!communitiesMap[slug]) {
+        communitiesMap[slug] = {
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          icon: '📁',
+          categories: [],
+          specifications: [],
+        };
+      }
+    });
 
     const standardKeys = new Set([
       'FABRIC', 'SIZE', 'FIT', 'GENDER', 'SEASON', 'PATTERN',
@@ -586,20 +613,63 @@ export class ProductService {
       'CATEGORY', 'CATEGORY_CLOTHING', 'CATEGORY_HARDWARE', 'CATEGORY_JEWELLERY', 'CATEGORY_ELECTRONICS', 'CATEGORY_GROCERY'
     ]);
 
-    customTypesSet.forEach((customType) => {
-      if (!standardKeys.has(customType)) {
-        const opts = dbRequests.filter((r) => r.type === customType).map((r) => r.value);
-        if (opts.length > 0) {
-          communities[0].specifications.push({
-            key: customType,
-            label: customType.replace(/_/g, ' '),
-            inputType: 'SELECT',
-            options: Array.from(new Set(opts)),
-          });
-        }
-      }
+    // Group custom DB requests by (communitySlug + type)
+    const groupedSpecs: Record<string, Record<string, string[]>> = {};
+
+    dbRequests.forEach((req) => {
+      const cSlug = (req.communitySlug || 'clothing').toLowerCase();
+      const type = req.type;
+
+      if (!groupedSpecs[cSlug]) groupedSpecs[cSlug] = {};
+      if (!groupedSpecs[cSlug][type]) groupedSpecs[cSlug][type] = [];
+      
+      groupedSpecs[cSlug][type].push(req.value);
     });
 
+    // Attach custom specification groups to their respective communities
+    Object.keys(groupedSpecs).forEach((cSlug) => {
+      let targetComm = communitiesMap[cSlug];
+      if (!targetComm) {
+        // Fallback to clothing if community not explicitly matched
+        targetComm = communitiesMap['clothing'];
+      }
+
+      const specsObj = groupedSpecs[cSlug];
+      Object.keys(specsObj).forEach((specType) => {
+        if (specType.startsWith('CATEGORY')) {
+          // If it's a category request, push to categories
+          const catValues = Array.from(new Set(specsObj[specType]));
+          catValues.forEach((catName) => {
+            if (!targetComm.categories.some((cat: any) => cat.name.toLowerCase() === catName.toLowerCase())) {
+              targetComm.categories.push({
+                id: catName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+                name: catName,
+                slug: catName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+              });
+            }
+          });
+        } else if (!standardKeys.has(specType)) {
+          // Custom specification option group
+          const uniqueOpts = Array.from(new Set(specsObj[specType]));
+          const existingSpecIndex = targetComm.specifications.findIndex((s: any) => s.key === specType);
+
+          if (existingSpecIndex >= 0) {
+            targetComm.specifications[existingSpecIndex].options = Array.from(
+              new Set([...targetComm.specifications[existingSpecIndex].options, ...uniqueOpts])
+            );
+          } else {
+            targetComm.specifications.push({
+              key: specType,
+              label: specType.replace(/_/g, ' '),
+              inputType: 'SELECT',
+              options: uniqueOpts,
+            });
+          }
+        }
+      });
+    });
+
+    const communities = Object.values(communitiesMap);
     return { communities, globalOptions };
   }
 
@@ -699,27 +769,20 @@ export class ProductService {
 
   // Super Admin: Delete / Remove Category or Attribute Option
   static async deleteCategoryAttributeRequest(requestIdOrValue: string) {
-    // Check if UUID ID matches
-    const existingById = await prisma.categoryAttributeRequest.findUnique({
-      where: { id: requestIdOrValue },
+    const cleanVal = requestIdOrValue.trim();
+
+    const existing = await prisma.categoryAttributeRequest.findFirst({
+      where: {
+        OR: [
+          { id: cleanVal },
+          { value: { equals: cleanVal, mode: 'insensitive' } },
+        ],
+      },
     });
 
-    if (existingById) {
+    if (existing) {
       const updated = await prisma.categoryAttributeRequest.update({
-        where: { id: requestIdOrValue },
-        data: { status: 'DELETED' },
-      });
-      return updated;
-    }
-
-    // Check if value matches
-    const existingByValue = await prisma.categoryAttributeRequest.findFirst({
-      where: { value: { equals: requestIdOrValue, mode: 'insensitive' } },
-    });
-
-    if (existingByValue) {
-      const updated = await prisma.categoryAttributeRequest.update({
-        where: { id: existingByValue.id },
+        where: { id: existing.id },
         data: { status: 'DELETED' },
       });
       return updated;
@@ -731,8 +794,9 @@ export class ProductService {
     const deleted = await prisma.categoryAttributeRequest.create({
       data: {
         userId: validUserId,
+        communitySlug: 'global',
         type: 'ATTRIBUTE',
-        value: requestIdOrValue,
+        value: cleanVal,
         description: 'Option deleted by Super Admin',
         status: 'DELETED',
       },
@@ -840,16 +904,24 @@ export class ProductService {
 
   // Super Admin: Update existing category/attribute option value & type
   static async updateCategoryAttributeOption(idOrOldValue: string, newValue: string, newType?: string, communitySlug?: string) {
+    const cleanOldValue = idOrOldValue.trim();
+    const cleanNewValue = newValue.trim();
+    const cleanType = newType && newType.trim() ? newType.trim().toUpperCase() : undefined;
+    const cleanCommunitySlug = communitySlug && communitySlug.trim() ? communitySlug.trim().toLowerCase() : undefined;
+
     const existing = await prisma.categoryAttributeRequest.findFirst({
       where: {
-        OR: [{ id: idOrOldValue }, { value: { equals: idOrOldValue.trim(), mode: 'insensitive' } }],
+        OR: [
+          { id: cleanOldValue },
+          { value: { equals: cleanOldValue, mode: 'insensitive' } },
+        ],
       },
     });
 
     if (existing) {
-      const dataToUpdate: any = { value: newValue.trim(), status: 'APPROVED' };
-      if (newType && newType.trim()) dataToUpdate.type = newType.trim().toUpperCase();
-      if (communitySlug && communitySlug.trim()) dataToUpdate.communitySlug = communitySlug.trim().toLowerCase();
+      const dataToUpdate: any = { value: cleanNewValue, status: 'APPROVED' };
+      if (cleanType) dataToUpdate.type = cleanType;
+      if (cleanCommunitySlug) dataToUpdate.communitySlug = cleanCommunitySlug;
 
       return await prisma.categoryAttributeRequest.update({
         where: { id: existing.id },
@@ -859,24 +931,53 @@ export class ProductService {
 
     const validUserId = await this.ensureValidUserId();
 
-    // Soft delete old default value
-    await prisma.categoryAttributeRequest.create({
-      data: {
-        userId: validUserId,
-        communitySlug: communitySlug ? communitySlug.trim().toLowerCase() : 'global',
-        type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
-        value: idOrOldValue.trim(),
-        status: 'DELETED',
-      },
+    // Check if old default value already has a record in DB
+    const existingOld = await prisma.categoryAttributeRequest.findFirst({
+      where: { value: { equals: cleanOldValue, mode: 'insensitive' } },
     });
+
+    if (existingOld) {
+      await prisma.categoryAttributeRequest.update({
+        where: { id: existingOld.id },
+        data: { status: 'DELETED' },
+      });
+    } else {
+      // Soft delete old default value
+      await prisma.categoryAttributeRequest.create({
+        data: {
+          userId: validUserId,
+          communitySlug: cleanCommunitySlug || 'global',
+          type: cleanType || 'ATTRIBUTE',
+          value: cleanOldValue,
+          status: 'DELETED',
+        },
+      });
+    }
+
+    // Check if new replacement value already has a record in DB
+    const existingNew = await prisma.categoryAttributeRequest.findFirst({
+      where: { value: { equals: cleanNewValue, mode: 'insensitive' } },
+    });
+
+    if (existingNew) {
+      return await prisma.categoryAttributeRequest.update({
+        where: { id: existingNew.id },
+        data: {
+          status: 'APPROVED',
+          value: cleanNewValue,
+          ...(cleanType ? { type: cleanType } : {}),
+          ...(cleanCommunitySlug ? { communitySlug: cleanCommunitySlug } : {}),
+        },
+      });
+    }
 
     // Create new approved replacement
     return await prisma.categoryAttributeRequest.create({
       data: {
         userId: validUserId,
-        communitySlug: communitySlug ? communitySlug.trim().toLowerCase() : 'global',
-        type: newType ? newType.trim().toUpperCase() : 'ATTRIBUTE',
-        value: newValue.trim(),
+        communitySlug: cleanCommunitySlug || 'global',
+        type: cleanType || 'ATTRIBUTE',
+        value: cleanNewValue,
         status: 'APPROVED',
       },
     });

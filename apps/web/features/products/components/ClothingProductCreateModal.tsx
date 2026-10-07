@@ -100,12 +100,16 @@ export function ClothingProductCreateModal({ isOpen, onClose, onSuccess }: Cloth
   const allowedCommunitiesList: string[] = (
     user?.business?.allowedCommunities ||
     (user as any)?.allowedCommunities ||
-    ['clothing', 'hardware', 'jewellery', 'electronics', 'grocery']
+    []
   ).map((s: string) => String(s).toLowerCase());
 
-  const visibleCommunities = communitiesList.filter((c: any) =>
-    allowedCommunitiesList.includes(c.id.toLowerCase())
-  );
+  const visibleCommunities =
+    allowedCommunitiesList.length > 0 && !allowedCommunitiesList.includes('*')
+      ? communitiesList.filter((c: any) =>
+          allowedCommunitiesList.includes(c.id.toLowerCase()) ||
+          allowedCommunitiesList.includes((c.slug || '').toLowerCase())
+        )
+      : communitiesList;
   const displayCommunities = visibleCommunities.length > 0 ? visibleCommunities : communitiesList;
 
   // Active Selected Community & Category

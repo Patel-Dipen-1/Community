@@ -39,6 +39,7 @@ export interface GlobalOptionsResponse {
 export interface CategoryRequestData {
   id: string;
   userId: string;
+  communitySlug?: string | null;
   type: string;
   value: string;
   description?: string | null;
