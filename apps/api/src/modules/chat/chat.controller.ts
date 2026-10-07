@@ -75,7 +75,7 @@ export class ChatController {
     try {
       const senderId = (req as any).user.userId || (req as any).user.id;
       let conversationId = req.params.id || req.body.conversationId;
-      const { recipientId, recipientUserId, recipientMobileNumber, text, productCode, mediaUrl, clientMessageId } = req.body;
+      const { recipientId, recipientUserId, recipientMobileNumber, text, productCode, mediaUrl, clientMessageId, replyToId } = req.body;
 
       if (!conversationId) {
         const targetIdentifier = recipientId || recipientUserId || recipientMobileNumber;
@@ -86,7 +86,7 @@ export class ChatController {
         conversationId = convRes.conversationId;
       }
 
-      const message = await ChatService.sendMessage(senderId, conversationId, { text, productCode, mediaUrl, clientMessageId });
+      const message = await ChatService.sendMessage(senderId, conversationId, { text, productCode, mediaUrl, clientMessageId, replyToId });
       
       // Broadcast live via Socket.io if available on req.app
       const io = req.app.get('io');
@@ -101,6 +101,42 @@ export class ChatController {
       return res.status(isRestricted ? 403 : 400).json({
         success: false,
         error: err.message?.replace('RESTRICTED_NOT_APPROVED: ', '') || 'Failed to send message',
+      });
+    }
+  }
+
+  static async forwardMessage(req: Request, res: Response) {
+    try {
+      const senderId = (req as any).user.userId || (req as any).user.id;
+      const { messageId, messageType, targetConversationIds, targetGroupIds } = req.body;
+
+      if (!messageId) {
+        return res.status(400).json({ success: false, error: 'messageId is required for forwarding' });
+      }
+
+      const result = await ChatService.forwardMessage(senderId, {
+        messageId,
+        messageType,
+        targetConversationIds,
+        targetGroupIds,
+      });
+
+      const io = req.app.get('io');
+      if (io && result.messages) {
+        result.messages.forEach((msg) => {
+          if (msg.conversationId) {
+            io.to(msg.conversationId).emit('receive_message', msg);
+          } else if (msg.groupId) {
+            io.to(msg.groupId).emit('receive_group_message', msg);
+          }
+        });
+      }
+
+      return res.status(200).json(result);
+    } catch (err: any) {
+      return res.status(400).json({
+        success: false,
+        error: err.message || 'Failed to forward message',
       });
     }
   }
@@ -319,6 +355,19 @@ export class ChatController {
       const { PollService } = await import('./poll.service');
       const messages = await PollService.getStarredMessages(userId);
       return res.status(200).json({ success: true, messages });
+    } catch (err: any) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+
+  static async markAsRead(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user.userId || (req as any).user.id;
+      const conversationId = req.params.id;
+      const io = req.app.get('io');
+
+      const result = await ChatService.markConversationAsRead(userId, conversationId, io);
+      return res.status(200).json(result);
     } catch (err: any) {
       return res.status(400).json({ success: false, error: err.message });
     }

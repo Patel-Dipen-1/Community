@@ -6,10 +6,11 @@ import {
   ActivityIndicator,
   TouchableOpacityProps,
 } from 'react-native';
+import { colors, typography, borderRadius, spacing } from '../../theme/theme';
 
 interface ButtonProps extends TouchableOpacityProps {
   title: string;
-  variant?: 'primary' | 'secondary' | 'danger' | 'outline';
+  variant?: 'primary' | 'secondary' | 'danger' | 'outline' | 'accent';
   loading?: boolean;
 }
 
@@ -29,6 +30,8 @@ export const Button: React.FC<ButtonProps> = ({
         return styles.danger;
       case 'outline':
         return styles.outline;
+      case 'accent':
+        return styles.accent;
       default:
         return styles.primary;
     }
@@ -58,7 +61,7 @@ export const Button: React.FC<ButtonProps> = ({
       {...props}
     >
       {loading ? (
-        <ActivityIndicator color="#ffffff" size="small" />
+        <ActivityIndicator color={colors.textMain} size="small" />
       ) : (
         <Text style={[styles.text, getTextStyle()]}>{title}</Text>
       )}
@@ -68,42 +71,45 @@ export const Button: React.FC<ButtonProps> = ({
 
 const styles = StyleSheet.create({
   base: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 14,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderRadius: borderRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primary: {
-    backgroundColor: '#4f46e5',
+    backgroundColor: colors.primary,
   },
   secondary: {
-    backgroundColor: '#1e293b',
+    backgroundColor: colors.surfaceLight,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.borderLight,
   },
   danger: {
-    backgroundColor: '#e11d48',
+    backgroundColor: colors.error,
+  },
+  accent: {
+    backgroundColor: colors.accentDark,
   },
   outline: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#6366f1',
+    borderColor: colors.primaryLight,
   },
   disabled: {
     opacity: 0.5,
   },
   text: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.fontWeight.semibold,
   },
   primaryText: {
-    color: '#ffffff',
+    color: colors.textMain,
   },
   secondaryText: {
-    color: '#e2e8f0',
+    color: colors.textLight,
   },
   outlineText: {
-    color: '#818cf8',
+    color: colors.primaryLight,
   },
 });

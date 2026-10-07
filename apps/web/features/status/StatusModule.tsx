@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   useGetPosterStatusConfigQuery,
   useCreateStatusMutation,
@@ -16,6 +17,7 @@ import { useToast } from '../../components/common/Toast';
 import { uploadSingleFile } from '../../lib/utils/upload';
 
 export function StatusModule() {
+  const router = useRouter();
   const { addToast } = useToast();
   const { data: profileData } = useGetProfileQuery();
   const currentUser = profileData?.user;
@@ -632,23 +634,41 @@ export function StatusModule() {
                       No vendor views recorded yet.
                     </div>
                   ) : (
-                    viewersData?.viewers?.map((v) => (
-                      <div key={v.viewerId} className="py-3 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-emerald-600/20 text-emerald-300 font-bold flex items-center justify-center border border-emerald-500/30">
-                            {v.fullName.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <h5 className="font-bold text-white">{v.fullName}</h5>
-                            <p className="text-[10px] text-slate-400">{v.shopName} • {v.mobileNumber}</p>
-                          </div>
-                        </div>
+                    viewersData?.viewers?.map((v) => {
+                      const d = new Date(v.viewedAt);
+                      const now = new Date();
+                      const isToday = d.toDateString() === now.toDateString();
+                      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const viewTimeFormatted = isToday ? `Today, ${timeStr}` : timeStr;
 
-                        <span className="text-[10px] text-slate-500">
-                          {new Date(v.viewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    ))
+                      return (
+                        <div key={v.viewerId} className="py-3 flex items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-9 h-9 rounded-full bg-emerald-600/20 text-emerald-300 font-extrabold flex items-center justify-center border border-emerald-500/30 text-sm">
+                              {v.fullName ? v.fullName.charAt(0).toUpperCase() : 'U'}
+                            </div>
+                            <div>
+                              <h5 className="font-bold text-white">{v.fullName}</h5>
+                              <p className="text-[10px] text-slate-400">🏢 {v.shopName || 'Verified Vendor'}</p>
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                ⏱️ {viewTimeFormatted}
+                              </span>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              setShowViewersDrawer(false);
+                              setActiveStoryGroup(null);
+                              router.push(`/chat?userId=${v.viewerId}&name=${encodeURIComponent(v.shopName || v.fullName)}`);
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-[11px] shadow transition flex items-center gap-1"
+                          >
+                            💬 Direct Chat
+                          </button>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>

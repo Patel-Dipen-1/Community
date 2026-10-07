@@ -371,8 +371,34 @@ export class ChatService {
         conversationId,
         ...whereCursor,
       },
+      include: {
+        replyToMessage: {
+          select: {
+            id: true,
+            text: true,
+            senderId: true,
+            productCode: true,
+            mediaUrl: true,
+            sender: {
+              select: {
+                fullName: true,
+              },
+            },
+          },
+        },
+      },
       take: limit,
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+
+    // Auto mark unread incoming messages in this conversation as READ
+    await prisma.message.updateMany({
+      where: {
+        conversationId: conversation.id,
+        senderId: { not: userId },
+        status: { not: 'READ' },
+      },
+      data: { status: 'READ' },
     });
 
     return {
@@ -395,11 +421,50 @@ export class ChatService {
         text: m.text,
         productCode: m.productCode,
         mediaUrl: m.mediaUrl,
+        replyToId: m.replyToId || undefined,
+        replyToMessage: m.replyToMessage
+          ? {
+              id: m.replyToMessage.id,
+              text: m.replyToMessage.text,
+              senderId: m.replyToMessage.senderId,
+              senderName: m.replyToMessage.sender?.fullName || 'User',
+              productCode: m.replyToMessage.productCode,
+              mediaUrl: m.replyToMessage.mediaUrl,
+            }
+          : undefined,
+        isForwarded: m.isForwarded,
+        forwardCount: m.forwardCount || 0,
+        isForwardedManyTimes: (m.forwardCount || 0) >= 5,
         isEdited: m.isEdited,
         isDeleted: m.isDeleted,
+        status: m.status || 'SENT',
         createdAt: m.createdAt,
       })),
     };
+  }
+
+  /**
+   * Explicitly mark all unread messages in a conversation as READ for current user.
+   */
+  static async markConversationAsRead(userId: string, conversationId: string, ioServer?: any) {
+    const updated = await prisma.message.updateMany({
+      where: {
+        conversationId,
+        senderId: { not: userId },
+        status: { not: 'READ' },
+      },
+      data: { status: 'READ' },
+    });
+
+    if (ioServer) {
+      ioServer.to(conversationId).emit('message_status_update', {
+        conversationId,
+        status: 'READ',
+        readerId: userId,
+      });
+    }
+
+    return { success: true, updatedCount: updated.count };
   }
 
   /**
@@ -409,7 +474,7 @@ export class ChatService {
   static async sendMessage(
     senderId: string,
     conversationId: string,
-    data: { text?: string; productCode?: string; mediaUrl?: string; clientMessageId?: string }
+    data: { text?: string; productCode?: string; mediaUrl?: string; clientMessageId?: string; replyToId?: string; isForwarded?: boolean; forwardCount?: number }
   ) {
     // 0. Idempotency Check: Return existing message if duplicate retry
     if (data.clientMessageId?.trim()) {
@@ -501,9 +566,28 @@ export class ChatService {
           conversationId,
           senderId,
           clientMessageId: data.clientMessageId?.trim() || null,
+          replyToId: data.replyToId?.trim() || null,
           text: data.text?.trim() || null,
           productCode: data.productCode?.trim() || null,
           mediaUrl: data.mediaUrl?.trim() || null,
+          isForwarded: !!data.isForwarded,
+          forwardCount: Number(data.forwardCount) || 0,
+        },
+        include: {
+          replyToMessage: {
+            select: {
+              id: true,
+              text: true,
+              senderId: true,
+              productCode: true,
+              mediaUrl: true,
+              sender: {
+                select: {
+                  fullName: true,
+                },
+              },
+            },
+          },
         },
       });
 
@@ -513,7 +597,21 @@ export class ChatService {
         data: { updatedAt: new Date() },
       });
 
-      return message;
+      return {
+        ...message,
+        status: message.status || 'SENT',
+        replyToMessage: message.replyToMessage
+          ? {
+              id: message.replyToMessage.id,
+              text: message.replyToMessage.text,
+              senderId: message.replyToMessage.senderId,
+              senderName: message.replyToMessage.sender?.fullName || 'User',
+              productCode: message.replyToMessage.productCode,
+              mediaUrl: message.replyToMessage.mediaUrl,
+            }
+          : undefined,
+        isForwardedManyTimes: (message.forwardCount || 0) >= 5,
+      };
     } catch (err: any) {
       if (err?.code === 'P2002' && data.clientMessageId?.trim()) {
         const existingMessage = await prisma.message.findUnique({
@@ -657,6 +755,96 @@ export class ChatService {
     });
 
     return setting;
+  }
+
+  /**
+   * Forward a message to one or multiple eligible conversations / groups.
+   * Capped at 5 chats normally; capped at 1 chat if forwarded 5 or more times.
+   */
+  static async forwardMessage(
+    senderId: string,
+    data: {
+      messageId: string;
+      messageType?: 'DIRECT' | 'GROUP';
+      targetConversationIds?: string[];
+      targetGroupIds?: string[];
+    }
+  ) {
+    const { messageId, messageType = 'DIRECT', targetConversationIds = [], targetGroupIds = [] } = data;
+    const totalTargets = targetConversationIds.length + targetGroupIds.length;
+
+    if (totalTargets === 0) {
+      throw new Error('No target conversations or groups specified for forwarding.');
+    }
+
+    let originalText: string | null = null;
+    let originalProductCode: string | null = null;
+    let originalMediaUrl: string | null = null;
+    let currentForwardCount = 0;
+
+    if (messageType === 'GROUP') {
+      const orig = await prisma.groupMessage.findUnique({ where: { id: messageId } });
+      if (!orig) throw new Error('Original group message not found.');
+      originalText = orig.text;
+      originalProductCode = orig.productCode;
+      originalMediaUrl = orig.mediaUrl;
+      currentForwardCount = orig.forwardCount || (orig.isForwarded ? 1 : 0);
+    } else {
+      const orig = await prisma.message.findUnique({ where: { id: messageId } });
+      if (!orig) throw new Error('Original message not found.');
+      originalText = orig.text;
+      originalProductCode = orig.productCode;
+      originalMediaUrl = orig.mediaUrl;
+      currentForwardCount = orig.forwardCount || (orig.isForwarded ? 1 : 0);
+    }
+
+    const newForwardCount = currentForwardCount + 1;
+    const isManyTimes = currentForwardCount >= 5 || newForwardCount >= 5;
+
+    if (isManyTimes && totalTargets > 1) {
+      throw new Error('FORWARD_RESTRICTED: Messages forwarded 5 or more times can only be forwarded to 1 chat at a time.');
+    }
+
+    if (!isManyTimes && totalTargets > 5) {
+      throw new Error('FORWARD_LIMIT_EXCEEDED: You can only forward to up to 5 chats at a time.');
+    }
+
+    const createdMessages: any[] = [];
+
+    // Forward to direct conversations
+    for (const convId of targetConversationIds) {
+      const created = await ChatService.sendMessage(senderId, convId, {
+        text: originalText || undefined,
+        productCode: originalProductCode || undefined,
+        mediaUrl: originalMediaUrl || undefined,
+        isForwarded: true,
+        forwardCount: newForwardCount,
+      });
+      createdMessages.push(created);
+    }
+
+    // Forward to groups
+    for (const grpId of targetGroupIds) {
+      const grpMsg = await prisma.groupMessage.create({
+        data: {
+          groupId: grpId,
+          senderId,
+          text: originalText,
+          productCode: originalProductCode,
+          mediaUrl: originalMediaUrl,
+          isForwarded: true,
+          forwardCount: newForwardCount,
+        },
+      });
+      createdMessages.push({ ...grpMsg, isForwardedManyTimes: isManyTimes });
+    }
+
+    return {
+      success: true,
+      forwardCount: newForwardCount,
+      isForwardedManyTimes: isManyTimes,
+      messages: createdMessages,
+    };
   }
 }
 

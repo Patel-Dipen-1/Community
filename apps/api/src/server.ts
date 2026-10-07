@@ -121,6 +121,7 @@ import { verifySubscriptionAccess } from './middleware/subscription.middleware';
 
 app.use('/api/v1/auth', authRateLimiter, userRoutes);
 app.use('/api/v1/user', userRoutes);
+app.use('/api/v1/calls', userRoutes);
 app.use('/api/v1/business', cacheResponse(60), verifySubscriptionAccess, businessRoutes);
 app.use('/api/v1/products', cacheResponse(30), verifySubscriptionAccess, productRoutes);
 app.use('/api/v1/store', cacheResponse(30), verifySubscriptionAccess, storeRoutes);
@@ -565,6 +566,53 @@ io.on('connection', (socket) => {
     if (data?.groupId) {
       io.to(`group_${data.groupId}`).emit('group_message_edited', data);
     }
+  });
+
+  // Real-Time Message Read ACK (2 Blue Ticks)
+  socket.on('mark_read', async (data: { conversationId: string }) => {
+    const userId = socket.data.userId;
+    if (!userId || !data?.conversationId) return;
+
+    try {
+      await prisma.message.updateMany({
+        where: {
+          conversationId: data.conversationId,
+          senderId: { not: userId },
+          status: { not: 'READ' },
+        },
+        data: { status: 'READ' },
+      });
+
+      io.to(data.conversationId).emit('message_status_update', {
+        conversationId: data.conversationId,
+        status: 'READ',
+        readerId: userId,
+      });
+    } catch (e) {}
+  });
+
+  // Real-Time Message Delivered ACK (2 Grey Ticks)
+  socket.on('mark_delivered', async (data: { conversationId: string; messageIds?: string[] }) => {
+    const userId = socket.data.userId;
+    if (!userId || !data?.conversationId) return;
+
+    try {
+      await prisma.message.updateMany({
+        where: {
+          conversationId: data.conversationId,
+          senderId: { not: userId },
+          status: 'SENT',
+          ...(data.messageIds && data.messageIds.length > 0 ? { id: { in: data.messageIds } } : {}),
+        },
+        data: { status: 'DELIVERED' },
+      });
+
+      io.to(data.conversationId).emit('message_status_update', {
+        conversationId: data.conversationId,
+        status: 'DELIVERED',
+        recipientId: userId,
+      });
+    } catch (e) {}
   });
 
   // Typing Indicator Events (Direct Chat & Group Chat)

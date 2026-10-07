@@ -11,9 +11,8 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation.types';
-import { Header } from '../components/common/Header';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { Header, Input, Button, PageTitle, SectionTitle, MutedText, BodyText } from '../components/common';
+import { colors, spacing, borderRadius } from '../theme/theme';
 import { useGetProductByIdQuery } from '../store/api/productApi';
 import { useSendInquiryMutation } from '../store/api/inquiryApi';
 
@@ -54,7 +53,7 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       <View style={styles.container}>
         <Header title="Product Specs" showBack onBack={() => navigation.goBack()} />
         <View style={styles.centerBox}>
-          <Text style={styles.loadingText}>Loading product details...</Text>
+          <MutedText style={styles.loadingText}>Loading product details...</MutedText>
         </View>
       </View>
     );
@@ -75,31 +74,31 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             {product.isHotSelling && <Text style={styles.hotBadge}>🔥 Hot Selling</Text>}
           </View>
 
-          <Text style={styles.title}>{product.title}</Text>
+          <PageTitle style={styles.title}>{product.title}</PageTitle>
           <Text style={styles.price}>₹{product.priceTiers?.[0]?.price} / Piece</Text>
-          <Text style={styles.moqText}>Minimum Order Quantity (MOQ): {product.moq} Pcs</Text>
+          <MutedText style={styles.moqText}>Minimum Order Quantity (MOQ): {product.moq} Pcs</MutedText>
 
           {/* Pricing Tiers Table */}
           <View style={styles.tiersCard}>
             <Text style={styles.tiersTitle}>Bulk Tier Pricing</Text>
             {product.priceTiers?.map((tier, idx) => (
               <View key={idx} style={styles.tierRow}>
-                <Text style={styles.tierQty}>Qty {tier.minQty}+ Pcs</Text>
+                <BodyText style={styles.tierQty}>Qty {tier.minQty}+ Pcs</BodyText>
                 <Text style={styles.tierPrice}>₹{tier.price} / pc</Text>
               </View>
             ))}
           </View>
 
           {/* Description */}
-          <Text style={styles.secTitle}>Product Description</Text>
-          <Text style={styles.description}>{product.description}</Text>
+          <SectionTitle style={styles.secTitle}>Product Description</SectionTitle>
+          <BodyText style={styles.description}>{product.description}</BodyText>
 
           {/* Vendor Details */}
           {product.business && (
             <View style={styles.vendorCard}>
-              <Text style={styles.vendorHeader}>Verified Supplier Store</Text>
+              <MutedText style={styles.vendorHeader}>Verified Supplier Store</MutedText>
               <Text style={styles.vendorName}>{product.business.shopName}</Text>
-              <Text style={styles.vendorLoc}>📍 {product.business.city}, {product.business.state}</Text>
+              <MutedText style={styles.vendorLoc}>📍 {product.business.city}, {product.business.state}</MutedText>
             </View>
           )}
         </View>
@@ -131,8 +130,8 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       <Modal visible={inquiryModalVisible} animationType="slide" transparent>
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>📩 Send Wholesale Inquiry</Text>
-            <Text style={styles.modalSub}>Direct inquiry dispatch to verified supplier.</Text>
+            <SectionTitle style={styles.modalTitle}>📩 Send Wholesale Inquiry</SectionTitle>
+            <MutedText style={styles.modalSub}>Direct inquiry dispatch to verified supplier.</MutedText>
 
             <Input label="Target Quantity *" keyboardType="numeric" value={quantity} onChangeText={setQuantity} />
             <Input label="Target Price (₹ per unit)" keyboardType="numeric" placeholder="Optional expected rate" value={targetPrice} onChangeText={setTargetPrice} />
@@ -150,37 +149,38 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
+  container: { flex: 1, backgroundColor: colors.background },
   centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  loadingText: { color: '#94a3b8' },
+  loadingText: { color: colors.textMuted },
   scrollContent: { paddingBottom: 80 },
-  mainImage: { width: '100%', height: 260, backgroundColor: '#1e293b' },
-  contentBox: { padding: 16 },
-  badgeRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  skuBadge: { color: '#818cf8', fontSize: 11, fontWeight: '900', backgroundColor: '#0f172a', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#334155' },
-  hotBadge: { color: '#ffffff', fontSize: 10, fontWeight: '800', backgroundColor: '#e11d48', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  title: { color: '#f8fafc', fontSize: 20, fontWeight: '900', marginBottom: 6 },
-  price: { color: '#34d399', fontSize: 22, fontWeight: '900', marginBottom: 2 },
-  moqText: { color: '#94a3b8', fontSize: 13, marginBottom: 16 },
-  tiersCard: { backgroundColor: '#0f172a', borderRadius: 14, borderWidth: 1, borderColor: '#1e293b', padding: 14, marginBottom: 16 },
-  tiersTitle: { color: '#818cf8', fontSize: 13, fontWeight: '800', marginBottom: 8 },
-  tierRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  tierQty: { color: '#cbd5e1', fontSize: 12 },
-  tierPrice: { color: '#34d399', fontSize: 12, fontWeight: '800' },
-  secTitle: { color: '#ffffff', fontSize: 15, fontWeight: '800', marginBottom: 6 },
-  description: { color: '#cbd5e1', fontSize: 13, lineHeight: 20, marginBottom: 16 },
-  vendorCard: { backgroundColor: '#0f172a', borderRadius: 14, borderWidth: 1, borderColor: '#1e293b', padding: 14 },
-  vendorHeader: { color: '#64748b', fontSize: 11, fontWeight: '700' },
-  vendorName: { color: '#ffffff', fontSize: 16, fontWeight: '800', marginTop: 2 },
-  vendorLoc: { color: '#94a3b8', fontSize: 12, marginTop: 2 },
-  bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', gap: 10, padding: 14, backgroundColor: '#0f172a', borderTopWidth: 1, borderTopColor: '#1e293b' },
-  inquireBtn: { flex: 1, backgroundColor: '#1e293b', paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
-  inquireBtnText: { color: '#cbd5e1', fontSize: 13, fontWeight: '700' },
-  chatBtn: { flex: 1, backgroundColor: '#4f46e5', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  chatBtnText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#0f172a', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#334155' },
-  modalTitle: { color: '#ffffff', fontSize: 18, fontWeight: '900', marginBottom: 4 },
-  modalSub: { color: '#94a3b8', fontSize: 12, marginBottom: 16 },
-  modalActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  mainImage: { width: '100%', height: 260, backgroundColor: colors.surfaceLight },
+  contentBox: { padding: spacing.lg },
+  badgeRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  skuBadge: { color: colors.primaryLight, fontSize: 11, fontWeight: '900', backgroundColor: colors.card, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: borderRadius.xs, borderWidth: 1, borderColor: colors.borderLight },
+  hotBadge: { color: colors.textMain, fontSize: 10, fontWeight: '800', backgroundColor: colors.error, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: borderRadius.xs },
+  title: { fontSize: 20, marginBottom: spacing.xs },
+  price: { color: colors.accentLight, fontSize: 22, fontWeight: '900', marginBottom: 2 },
+  moqText: { fontSize: 13, marginBottom: spacing.lg },
+  tiersCard: { backgroundColor: colors.card, borderRadius: borderRadius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md, marginBottom: spacing.lg },
+  tiersTitle: { color: colors.primaryLight, fontSize: 13, fontWeight: '800', marginBottom: spacing.sm },
+  tierRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.border },
+  tierQty: { fontSize: 12 },
+  tierPrice: { color: colors.accentLight, fontSize: 12, fontWeight: '800' },
+  secTitle: { marginBottom: spacing.xs },
+  description: { fontSize: 13, lineHeight: 20, marginBottom: spacing.lg },
+  vendorCard: { backgroundColor: colors.card, borderRadius: borderRadius.md, borderWidth: 1, borderColor: colors.border, padding: spacing.md },
+  vendorHeader: { fontSize: 11, fontWeight: '700' },
+  vendorName: { color: colors.textMain, fontSize: 16, fontWeight: '800', marginTop: 2 },
+  vendorLoc: { fontSize: 12, marginTop: 2 },
+  bottomBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', gap: spacing.sm, padding: spacing.md, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
+  inquireBtn: { flex: 1, backgroundColor: colors.surfaceLight, paddingVertical: spacing.md, borderRadius: borderRadius.md, alignItems: 'center', borderWidth: 1, borderColor: colors.borderLight },
+  inquireBtnText: { color: colors.textLight, fontSize: 13, fontWeight: '700' },
+  chatBtn: { flex: 1, backgroundColor: colors.primary, paddingVertical: spacing.md, borderRadius: borderRadius.md, alignItems: 'center' },
+  chatBtnText: { color: colors.textMain, fontSize: 13, fontWeight: '700' },
+  modalBg: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', padding: spacing.xl },
+  modalContent: { backgroundColor: colors.surface, borderRadius: borderRadius.xl, padding: spacing.xl, borderWidth: 1, borderColor: colors.borderLight },
+  modalTitle: { fontSize: 18, marginBottom: spacing.xs },
+  modalSub: { fontSize: 12, marginBottom: spacing.lg },
+  modalActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
 });
+

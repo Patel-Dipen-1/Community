@@ -26,4 +26,13 @@ export type RootStackParamList = {
   BroadcastList: undefined;
   Subscription: undefined;
   Settings: undefined;
+  Call: {
+    recipientId: string;
+    recipientName: string;
+    recipientAvatar?: string;
+    callType?: 'AUDIO' | 'VIDEO';
+    isIncoming?: boolean;
+  };
+  CallHistory: undefined;
 };
+

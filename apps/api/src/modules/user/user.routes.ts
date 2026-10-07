@@ -14,7 +14,12 @@ router.post('/request-deletion', authenticateToken, UserController.requestDeleti
 router.get('/privacy', authenticateToken, UserController.getPrivacy);
 router.put('/privacy', authenticateToken, UserController.updatePrivacy);
 router.get('/call-history', authenticateToken, UserController.getCallHistory);
+router.get('/calls/history', authenticateToken, UserController.getCallHistory);
+router.get('/history', authenticateToken, UserController.getCallHistory);
+
 router.post('/call-log', authenticateToken, UserController.logCall);
+router.post('/calls/log', authenticateToken, UserController.logCall);
+router.post('/log', authenticateToken, UserController.logCall);
 
 // End-to-End Encryption (E2EE) Key Exchange
 router.post('/security/keys', authenticateToken, UserController.registerE2EEKeys);

@@ -141,7 +141,7 @@ export class StatusService {
         where: {
           createdAt: { gte: twentyFourHoursAgo },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: 'asc' },
         include: {
           user: {
             select: { id: true, fullName: true, mobileNumber: true },
@@ -193,7 +193,7 @@ export class StatusService {
           },
         ],
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' },
       include: {
         user: {
           select: { id: true, fullName: true, mobileNumber: true },

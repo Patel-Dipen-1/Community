@@ -109,6 +109,7 @@ model Business {
   city                String
   state               String
   pincode             String
+  tradeTerms          String?
   verificationTag     Boolean            @default(false)
   assignedRole        Role?
   allowedCommunities  String[]           // Array of community slugs user is granted access to (e.g. ["clothing", "electronics"])
@@ -321,6 +322,7 @@ model Message {
   productCode     String?
   mediaUrl        String?
   isForwarded     Boolean      @default(false)
+  forwardCount    Int          @default(0)
   isEdited        Boolean      @default(false)
   isDeleted       Boolean      @default(false)
   status          String       @default("SENT") // SENT, DELIVERED, READ
@@ -394,6 +396,7 @@ model GroupMessage {
   productCode     String?
   mediaUrl        String?
   isForwarded     Boolean       @default(false)
+  forwardCount    Int           @default(0)
   isEdited        Boolean       @default(false)
   isDeleted       Boolean       @default(false)
   status          String        @default("SENT")

@@ -39,6 +39,7 @@ export class UserService {
             city: user.business.city,
             state: user.business.state,
             pincode: user.business.pincode,
+            tradeTerms: user.business.tradeTerms || null,
             verificationTag: user.business.verificationTag,
             assignedRole: user.business.assignedRole || (user.email === 'dnpatel2002@gmail.com' ? 'SUPER_ADMIN' : 'RETAILER'),
             allowedCommunities: user.business.allowedCommunities || ['clothing'],
@@ -58,6 +59,7 @@ export class UserService {
     city?: string;
     state?: string;
     pincode?: string;
+    tradeTerms?: string;
     shopMediaUrls?: string[];
   }) {
     const user = await prisma.user.findUnique({
@@ -87,11 +89,12 @@ export class UserService {
           ? {
               update: {
                 shopName: data.shopName ?? user.business.shopName,
-                gstNumber: data.gstNumber ?? user.business.gstNumber,
+                gstNumber: data.gstNumber !== undefined ? data.gstNumber : user.business.gstNumber,
                 streetAddress: data.streetAddress ?? user.business.streetAddress,
                 city: data.city ?? user.business.city,
                 state: data.state ?? user.business.state,
                 pincode: data.pincode ?? user.business.pincode,
+                tradeTerms: data.tradeTerms !== undefined ? data.tradeTerms : user.business.tradeTerms,
                 media: data.shopMediaUrls?.length
                   ? {
                       deleteMany: {},

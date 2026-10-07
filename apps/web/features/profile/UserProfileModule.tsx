@@ -28,6 +28,7 @@ export function UserProfileModule() {
     city: '',
     state: '',
     pincode: '',
+    tradeTerms: '',
   });
 
   // Active Settings Sub-Tab
@@ -87,6 +88,7 @@ export function UserProfileModule() {
         city: business.city || '',
         state: business.state || '',
         pincode: business.pincode || '',
+        tradeTerms: business.tradeTerms || '',
       });
       setIsEditModalOpen(true);
     }
@@ -381,6 +383,13 @@ export function UserProfileModule() {
                     {business?.streetAddress ? `${business.streetAddress}, ${business.city}, ${business.state} - ${business.pincode}` : 'Surat, Gujarat'}
                   </span>
                 </div>
+
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 sm:col-span-2">
+                  <span className="text-slate-500 block mb-1 font-medium">Wholesale Trade Terms / Policy</span>
+                  <span className="text-emerald-400 font-semibold">
+                    {business?.tradeTerms || 'Min. Order: ₹50,000 • 20% Adv, Escrow Protected'}
+                  </span>
+                </div>
               </div>
             </div>
           )}
@@ -567,13 +576,24 @@ export function UserProfileModule() {
             </div>
 
             <div>
-              <label className="block text-slate-300 font-semibold mb-1">GST Number</label>
+              <label className="block text-slate-300 font-semibold mb-1">GST Number (Leave blank if not filed)</label>
               <input
                 type="text"
                 value={editForm.gstNumber}
                 onChange={(e) => setEditForm({ ...editForm, gstNumber: e.target.value })}
                 placeholder="24AAAAA0000A1Z5"
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-medium focus:outline-none focus:border-emerald-500 font-mono"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block text-slate-300 font-semibold mb-1">Wholesale Trade Terms / Policy</label>
+              <textarea
+                rows={2}
+                value={editForm.tradeTerms}
+                onChange={(e) => setEditForm({ ...editForm, tradeTerms: e.target.value })}
+                placeholder="e.g. Min Order ₹50,000 • 20% Advance, Escrow Protected"
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-medium focus:outline-none focus:border-emerald-500"
               />
             </div>
           </div>

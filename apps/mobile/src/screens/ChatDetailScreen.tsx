@@ -13,16 +13,18 @@ import {
   Alert,
   ScrollView,
   Linking,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import { RootStackParamList } from '../types/navigation.types';
 import { Header } from '../components/common/Header';
-import { useGetMessagesQuery, useSendMessageMutation, useToggleReactionMutation } from '../store/api/chatApi';
+import { useGetMessagesQuery, useSendMessageMutation, useForwardMessageMutation, useToggleReactionMutation, useGetConversationsQuery, useMarkConversationAsReadMutation } from '../store/api/chatApi';
 import { useGetMyStoreQuery, useGetStoreByIdQuery } from '../store/api/storeApi';
 import { socketService } from '../services/socket/socketService';
 import { useAppSelector } from '../hooks/useRedux';
-
+import { colors, spacing, borderRadius } from '../theme/theme';
 import { ENV_CONFIG } from '../constants/config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
@@ -34,6 +36,127 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [activeConvId, setActiveConvId] = useState<string | undefined>(conversationId);
   const [messageText, setMessageText] = useState('');
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [voiceSecs, setVoiceSecs] = useState(0);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [previewMediaUrl, setPreviewMediaUrl] = useState<string | null>(null);
+  const [replyingToMessage, setReplyingToMessage] = useState<any | null>(null);
+  const [selectedMsgActions, setSelectedMsgActions] = useState<any | null>(null);
+  const [forwardModalVisible, setForwardModalVisible] = useState(false);
+  const [forwardingMessage, setForwardingMessage] = useState<any | null>(null);
+  const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleScrollToQuotedMessage = (quoteContentSnippet: string) => {
+    if (!quoteContentSnippet) return;
+    const msgs = [...(messagesData?.messages || [])].reverse();
+    const targetIdx = msgs.findIndex(
+      (m) =>
+        (m.text && m.text.toLowerCase().includes(quoteContentSnippet.toLowerCase())) ||
+        quoteContentSnippet.toLowerCase().includes((m.text || '').toLowerCase())
+    );
+    if (targetIdx !== -1 && flatListRef.current) {
+      try {
+        flatListRef.current.scrollToIndex({ index: targetIdx, animated: true, viewPosition: 0.5 });
+        const targetId = msgs[targetIdx].id;
+        setHighlightedMsgId(targetId);
+        setTimeout(() => setHighlightedMsgId(null), 2000);
+      } catch (err) {
+        flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+      }
+    }
+  };
+
+  const handlePickPhoto = async () => {
+    setAttachmentModalVisible(false);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]?.uri) {
+        uploadAndSendMedia(result.assets[0], '📷 Photo Attachment');
+      }
+    } catch (e) {
+      Alert.alert('Photo Error', 'Failed to pick photo.');
+    }
+  };
+
+  const handlePickVideo = async () => {
+    setAttachmentModalVisible(false);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets[0]?.uri) {
+        uploadAndSendMedia(result.assets[0], '🎥 Video Attachment');
+      }
+    } catch (e) {
+      Alert.alert('Video Error', 'Failed to pick video.');
+    }
+  };
+
+  const uploadAndSendMedia = async (asset: any, defaultCaption: string) => {
+    try {
+      setUploadingMedia(true);
+      const formData = new FormData();
+      formData.append('file', {
+        uri: asset.uri,
+        name: asset.fileName || `media_${Date.now()}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
+        type: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+      } as any);
+
+      const uploadRes = await fetch(`${ENV_CONFIG.API_BASE_URL}/upload/single`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      const rawText = await uploadRes.text();
+      let uploadData: any = {};
+      try {
+        uploadData = JSON.parse(rawText);
+      } catch (e) {
+        console.warn('Upload response non-JSON text:', rawText);
+      }
+      const mediaUrl = uploadData.url || uploadData.file?.url || asset.uri;
+      setUploadingMedia(false);
+      await handleSendText(defaultCaption, undefined, mediaUrl);
+    } catch (err) {
+      setUploadingMedia(false);
+      await handleSendText(defaultCaption, undefined, asset.uri);
+    }
+  };
+
+  const handleStartVoiceRecording = () => {
+    setAttachmentModalVisible(false);
+    setIsRecordingVoice(true);
+    setVoiceSecs(0);
+    timerRef.current = setInterval(() => {
+      setVoiceSecs((prev) => prev + 1);
+    }, 1000);
+  };
+
+  const handleCancelVoiceRecording = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setIsRecordingVoice(false);
+    setVoiceSecs(0);
+  };
+
+  const handleSendVoiceNote = async () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    const duration = voiceSecs;
+    setIsRecordingVoice(false);
+    setVoiceSecs(0);
+
+    const mins = Math.floor(duration / 60);
+    const secs = duration % 60;
+    const durLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
+    const dummyAudioUrl = 'https://actions.google.com/sounds/v1/ambiences/rain_heavy.ogg';
+    await handleSendText(`🎙️ Voice Note (${durLabel})`, undefined, dummyAudioUrl);
+  };
   const [quickCatalogVisible, setQuickCatalogVisible] = useState(false);
   const [participantModalVisible, setParticipantModalVisible] = useState(false);
   const [selectedProductModal, setSelectedProductModal] = useState<any | null>(null);
@@ -44,13 +167,25 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     { skip: !activeConvId }
   );
 
+  const { data: conversationsData } = useGetConversationsQuery();
+
   const { data: myStoreData } = useGetMyStoreQuery();
   const { data: participantData, isLoading: loadingParticipant } = useGetStoreByIdQuery(recipientId, {
     skip: !recipientId,
   });
 
   const [sendMessage, { isLoading: isSending }] = useSendMessageMutation();
+  const [forwardMessageMutation, { isLoading: isForwardingMsg }] = useForwardMessageMutation();
   const [toggleReaction] = useToggleReactionMutation();
+  const [selectedForwardTargets, setSelectedForwardTargets] = useState<string[]>([]);
+
+  const [markAsReadMutation] = useMarkConversationAsReadMutation();
+
+  useEffect(() => {
+    if (activeConvId) {
+      markAsReadMutation(activeConvId).catch(() => {});
+    }
+  }, [activeConvId]);
 
   useEffect(() => {
     socketService.connect();
@@ -64,16 +199,30 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         refetch();
       }
     });
+    socketService.on('message_status_update', (data: any) => {
+      if (data?.conversationId === activeConvId) {
+        refetch();
+      }
+    });
+    if (activeConvId) {
+      socketService.emit('mark_read', { conversationId: activeConvId });
+    }
 
     return () => {
       socketService.off('message:new');
       socketService.off('receive_message');
+      socketService.off('message_status_update');
     };
   }, [activeConvId, recipientId]);
 
   const handleSendText = async (customText?: string, customProductCode?: string, customMediaUrl?: string) => {
-    const textToSend = customText ?? messageText.trim();
+    let textToSend = customText ?? messageText.trim();
     if (!textToSend && !customProductCode && !customMediaUrl) return;
+
+    const currentReplyId = replyingToMessage?.id;
+    if (replyingToMessage) {
+      setReplyingToMessage(null);
+    }
 
     try {
       const res = await sendMessage({
@@ -82,6 +231,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         text: textToSend || undefined,
         productCode: customProductCode,
         mediaUrl: customMediaUrl,
+        replyToId: currentReplyId,
         clientMessageId: `msg-${Date.now()}`,
       }).unwrap();
 
@@ -94,6 +244,50 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       refetch();
     } catch (err: any) {
       Alert.alert('Send Failed', err?.data?.error || err?.message || 'Unable to send message.');
+    }
+  };
+
+  const handleForwardSubmit = async () => {
+    if (!forwardingMessage || selectedForwardTargets.length === 0) return;
+    const isManyTimes = (forwardingMessage.forwardCount || 0) >= 5 || forwardingMessage.isForwardedManyTimes;
+    if (isManyTimes && selectedForwardTargets.length > 1) {
+      Alert.alert('Forward Limit', 'Messages forwarded 5 or more times can only be forwarded to 1 chat at a time.');
+      return;
+    }
+    if (!isManyTimes && selectedForwardTargets.length > 5) {
+      Alert.alert('Forward Limit', 'You can only select up to 5 chats at a time.');
+      return;
+    }
+
+    try {
+      await forwardMessageMutation({
+        messageId: forwardingMessage.id,
+        targetConversationIds: selectedForwardTargets,
+      }).unwrap();
+
+      setForwardModalVisible(false);
+      setForwardingMessage(null);
+      setSelectedForwardTargets([]);
+      Alert.alert('Message Forwarded', `Message forwarded to ${selectedForwardTargets.length} chat(s)!`);
+      refetch();
+    } catch (err: any) {
+      Alert.alert('Forward Failed', err?.data?.error || err?.message || 'Unable to forward message.');
+    }
+  };
+
+  const handleForwardMessageToRecipient = async (targetUserId: string, targetName: string) => {
+    if (!forwardingMessage) return;
+    try {
+      await forwardMessageMutation({
+        messageId: forwardingMessage.id,
+        targetConversationIds: targetUserId ? [targetUserId] : [],
+      }).unwrap();
+      setForwardModalVisible(false);
+      setForwardingMessage(null);
+      Alert.alert('Message Forwarded', `Message forwarded to ${targetName}.`);
+      refetch();
+    } catch (err: any) {
+      Alert.alert('Forward Failed', err?.data?.error || err?.message || 'Unable to forward message.');
     }
   };
 
@@ -138,13 +332,13 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     handleSendText(`📦 Shared Product Catalog Item: ${title}`, productCode);
   };
 
-  const handleCallParticipant = (phone?: string) => {
-    if (!phone) {
-      Alert.alert('Call Unavailable', 'No mobile number associated with this partner.');
-      return;
-    }
-    Linking.openURL(`tel:${phone}`).catch(() => {
-      Alert.alert('Error', 'Unable to launch phone dialer.');
+  const handleCallParticipant = (callType: 'AUDIO' | 'VIDEO' = 'AUDIO') => {
+    navigation.navigate('Call', {
+      recipientId,
+      recipientName,
+      recipientAvatar: route.params.recipientAvatar || participantBusiness?.logoUrl,
+      callType,
+      isIncoming: false,
     });
   };
 
@@ -165,30 +359,97 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header
-        title={recipientName || participantBusiness?.shopName || 'Direct Chat'}
-        subtitle="Tap for Profile & Catalog • Online"
-        showBack
-        onBack={() => navigation.goBack()}
-        onTitlePress={() => setParticipantModalVisible(true)}
-        rightElement={
-          <View style={styles.headerRightRow}>
+      {/* WhatsApp Contextual Selection Top Header Bar */}
+      {selectedMsgActions ? (
+        <View style={styles.selectedHeaderBar}>
+          <TouchableOpacity
+            style={styles.selectedHeaderLeftRow}
+            onPress={() => setSelectedMsgActions(null)}
+          >
+            <Text style={styles.selectedHeaderBackText}>←</Text>
+            <Text style={styles.selectedHeaderCountText}>1 Selected</Text>
+          </TouchableOpacity>
+
+          <View style={styles.selectedHeaderActionsRow}>
             <TouchableOpacity
-              style={styles.profileHeaderBtn}
-              onPress={() => setParticipantModalVisible(true)}
+              style={styles.selectedHeaderActionBtn}
+              onPress={() => {
+                setReplyingToMessage(selectedMsgActions);
+                setSelectedMsgActions(null);
+              }}
             >
-              <Text style={styles.profileHeaderBtnText}>👤 Profile</Text>
+              <Text style={styles.selectedHeaderActionIcon}>↩️ Reply</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.catalogBtn}
-              onPress={() => setQuickCatalogVisible(true)}
+              style={styles.selectedHeaderActionBtn}
+              onPress={() => {
+                setForwardingMessage(selectedMsgActions);
+                setForwardModalVisible(true);
+                setSelectedMsgActions(null);
+              }}
             >
-              <Text style={styles.catalogBtnText}>$ Catalog</Text>
+              <Text style={styles.selectedHeaderActionIcon}>↪️ Forward</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.selectedHeaderActionBtn}
+              onPress={() => {
+                toggleReaction({ messageId: selectedMsgActions.id, emoji: '❤️' });
+                setSelectedMsgActions(null);
+              }}
+            >
+              <Text style={styles.selectedHeaderActionIcon}>❤️</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.selectedHeaderActionBtn}
+              onPress={() => setSelectedMsgActions(null)}
+            >
+              <Text style={styles.selectedHeaderActionIcon}>✕</Text>
             </TouchableOpacity>
           </View>
-        }
-      />
+        </View>
+      ) : (
+        <Header
+          title={recipientName || participantBusiness?.shopName || 'Direct Chat'}
+          subtitle="Tap for Profile & Catalog • Online"
+          showBack
+          onBack={() => navigation.goBack()}
+          onTitlePress={() => setParticipantModalVisible(true)}
+          rightElement={
+            <View style={styles.headerRightRow}>
+              <TouchableOpacity
+                style={styles.callHeaderBtn}
+                onPress={() => handleCallParticipant('AUDIO')}
+              >
+                <Text style={styles.callHeaderBtnText}>📞 Call</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.callHeaderBtn}
+                onPress={() => handleCallParticipant('VIDEO')}
+              >
+                <Text style={styles.callHeaderBtnText}>📹 Video</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.profileHeaderBtn}
+                onPress={() => setParticipantModalVisible(true)}
+              >
+                <Text style={styles.profileHeaderBtnText}>👤 Profile</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.catalogBtn}
+                onPress={() => setQuickCatalogVisible(true)}
+              >
+                <Text style={styles.catalogBtnText}>$ Catalog</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      )}
 
       <KeyboardAvoidingView
         style={styles.flexOne}
@@ -197,15 +458,76 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       >
         <FlatList
           ref={flatListRef}
-          data={messagesData?.messages || []}
+          data={[...(messagesData?.messages || [])].reverse()}
           keyExtractor={(item) => item.id}
+          inverted
+          initialNumToRender={20}
+          maxToRenderPerBatch={25}
+          windowSize={10}
           contentContainerStyle={styles.messagesList}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           renderItem={({ item }) => {
             const isMe = item.senderId === user?.id;
+            const isForwarded = item.isForwarded || (item.forwardCount || 0) > 0 || item.text?.startsWith('↪️ Forwarded');
+            const isForwardedManyTimes = (item.forwardCount || 0) >= 5 || (item as any).isForwardedManyTimes;
+            const isSelected = selectedMsgActions?.id === item.id;
+
+            const replyObj = item.replyToMessage;
+            let quoteSender = replyObj?.senderName || (replyObj?.senderId === user?.id ? 'You' : recipientName);
+            let quoteContent = replyObj?.text || replyObj?.productCode || (replyObj?.mediaUrl ? '📷 Attachment' : '');
+            let mainMessageText = item.text || '';
+
+            if (!quoteSender && item.text?.includes('↩️ Replying to')) {
+              const lines = item.text.split('\n');
+              quoteSender = lines[0]?.replace('↩️ Replying to', '').replace(':', '').trim() || 'Message';
+              quoteContent = lines[1]?.replace(/^"/, '').replace(/"$/, '').trim() || '';
+              mainMessageText = lines.slice(3).join('\n') || lines.slice(2).join('\n') || mainMessageText;
+            } else if (isForwarded) {
+              mainMessageText = item.text?.replace('↪️ Forwarded\n', '').replace('↪️ Forwarded', '') || mainMessageText;
+            }
+
+            const isHighlighted = highlightedMsgId === item.id;
+
             return (
               <View style={[styles.bubbleWrapper, isMe ? styles.myWrapper : styles.otherWrapper]}>
-                <View style={[styles.bubble, isMe ? styles.myBubble : styles.otherBubble]}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => setSelectedMsgActions(isSelected ? null : item)}
+                  onLongPress={() => setSelectedMsgActions(item)}
+                  style={[
+                    styles.bubble,
+                    isMe ? styles.myBubble : styles.otherBubble,
+                    isSelected && styles.selectedBubbleHighlight,
+                    isHighlighted && styles.flashHighlightBubble,
+                  ]}
+                >
+                  {/* Forwarded Header Badge */}
+                  {isForwardedManyTimes ? (
+                    <View style={[styles.forwardedHeaderTag, { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
+                      <Text style={[styles.forwardedHeaderText, { color: '#fbbf24' }]}>⏩ Forwarded Many Times</Text>
+                    </View>
+                  ) : isForwarded ? (
+                    <View style={styles.forwardedHeaderTag}>
+                      <Text style={styles.forwardedHeaderText}>↪️ Forwarded</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Quoted Reply Box Inside Bubble (Tapping it scrolls to original message!) */}
+                  {Boolean(quoteSender) && (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => handleScrollToQuotedMessage(quoteContent)}
+                      style={styles.quotedInsideBox}
+                    >
+                      <View style={styles.quotedInsideAccentBar} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.quotedInsideSender}>{quoteSender}</Text>
+                        <Text style={styles.quotedInsideText} numberOfLines={2}>
+                          {quoteContent}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
                   {item.productCode && (
                     <View style={styles.productCardPreview}>
                       <Text style={styles.productCardSku}>📦 SKU: {item.productCode}</Text>
@@ -213,13 +535,49 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                     </View>
                   )}
 
-                  {item.mediaUrl && (
-                    <Image source={{ uri: item.mediaUrl }} style={styles.messageImage} />
-                  )}
+                  {/* Voice Note Bubble */}
+                  {item.text?.includes('🎙️ Voice Note') || item.mediaUrl?.includes('.ogg') || item.mediaUrl?.includes('.mp3') ? (
+                    <View style={styles.voiceNoteBubbleCard}>
+                      <TouchableOpacity
+                        style={styles.voicePlayBtn}
+                        onPress={() => setPlayingAudioId(playingAudioId === item.id ? null : item.id)}
+                      >
+                        <Text style={styles.voicePlayIcon}>{playingAudioId === item.id ? '⏸️' : '▶️'}</Text>
+                      </TouchableOpacity>
+                      <View style={styles.voiceWaveformBox}>
+                        <Text style={styles.voiceWaveformLine}>
+                          {playingAudioId === item.id ? '❚❙❘❙❚❙❚❙❘❙❚❙❘❙❚❙❚' : '||||||||||||||||||||'}
+                        </Text>
+                        <Text style={styles.voiceMetaSub}>🎙️ Voice Note • 0:15</Text>
+                      </View>
+                    </View>
+                  ) : item.text?.includes('🎥 Video') || item.mediaUrl?.includes('.mp4') ? (
+                    /* Video Attachment Card */
+                    <TouchableOpacity
+                      style={styles.videoCardContainer}
+                      onPress={() => setPreviewMediaUrl(item.mediaUrl || 'https://via.placeholder.com/600x400.png?text=Video+Player')}
+                    >
+                      {item.mediaUrl ? (
+                        <Image source={{ uri: item.mediaUrl }} style={styles.messageImage} />
+                      ) : (
+                        <View style={styles.videoPlaceholder}>
+                          <Text style={styles.playBadgeIcon}>▶️</Text>
+                        </View>
+                      )}
+                      <View style={styles.videoOverlayTag}>
+                        <Text style={styles.videoOverlayText}>🎥 Video Attachment</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : item.mediaUrl ? (
+                    /* Photo Attachment */
+                    <TouchableOpacity onPress={() => setPreviewMediaUrl(item.mediaUrl)}>
+                      <Image source={{ uri: item.mediaUrl }} style={styles.messageImage} />
+                    </TouchableOpacity>
+                  ) : null}
 
-                  {Boolean(item.text) && (
+                  {Boolean(mainMessageText) && !item.text?.includes('🎙️ Voice Note') && (
                     <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
-                      {item.text}
+                      {mainMessageText}
                     </Text>
                   )}
 
@@ -228,45 +586,232 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                       {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </Text>
                     {isMe && (
-                      <Text style={styles.statusTick}>
-                        {item.status === 'READ' ? '✓✓' : item.status === 'DELIVERED' ? '✓✓' : '✓'}
+                      <Text style={[styles.statusTick, item.status === 'READ' && { color: '#0284c7', fontWeight: 'bold' }]}>
+                        {item.status === 'PENDING'
+                          ? '🕒'
+                          : item.status === 'SENT'
+                          ? '✓'
+                          : item.status === 'DELIVERED'
+                          ? '✓✓'
+                          : item.status === 'READ'
+                          ? '✓✓'
+                          : '✓✓'}
                       </Text>
                     )}
                   </View>
-                </View>
-
-                {/* Emoji Reactions Bar */}
-                <TouchableOpacity
-                  style={styles.reactBtn}
-                  onPress={() => toggleReaction({ messageId: item.id, emoji: '❤️' })}
-                >
-                  <Text style={styles.reactIcon}>👍</Text>
                 </TouchableOpacity>
+
+                {/* Outer Media Quick Forward Arrow Button (➦) */}
+                {(item.mediaUrl || item.productCode) && (
+                  <TouchableOpacity
+                    style={styles.mediaOuterForwardBtn}
+                    onPress={() => {
+                      setForwardingMessage(item);
+                      setForwardModalVisible(true);
+                    }}
+                  >
+                    <Text style={styles.mediaOuterForwardIcon}>➦</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Instant 1-Tap WhatsApp Action Buttons next to bubble */}
+                <View style={styles.sideQuickActionCol}>
+                  <TouchableOpacity
+                    style={styles.sideActionIconBtn}
+                    onPress={() => setReplyingToMessage(item)}
+                  >
+                    <Text style={styles.sideActionIconText}>↩️</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.sideActionIconBtn}
+                    onPress={() => {
+                      setForwardingMessage(item);
+                      setForwardModalVisible(true);
+                    }}
+                  >
+                    <Text style={styles.sideActionIconText}>↪️</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           }}
         />
 
-        {/* Input Bar */}
-        <View style={styles.inputBar}>
-          <TouchableOpacity style={styles.attachBtn} onPress={handlePickAttachment}>
-            <Text style={styles.attachIcon}>📎</Text>
-          </TouchableOpacity>
+        {/* WhatsApp Quoted Reply Preview Banner */}
+        {replyingToMessage && !isRecordingVoice && (
+          <View style={styles.replyPreviewBanner}>
+            <View style={styles.replyPreviewAccentBar} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.replyPreviewSender}>
+                Replying to {replyingToMessage.senderId === user?.id ? 'You' : recipientName}
+              </Text>
+              <Text style={styles.replyPreviewText} numberOfLines={1}>
+                {replyingToMessage.text || (replyingToMessage.mediaUrl ? '📷 Attachment' : '📦 Product SKU')}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setReplyingToMessage(null)} style={styles.replyPreviewCloseBtn}>
+              <Text style={styles.replyPreviewCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-          <TextInput
-            style={styles.input}
-            placeholder="Type a message or tap $ for SKU catalog..."
-            placeholderTextColor="#64748b"
-            value={messageText}
-            onChangeText={setMessageText}
-            multiline
-          />
+        {/* Input Bar or Voice Recorder Bar */}
+        {isRecordingVoice ? (
+          <View style={styles.voiceRecordingBar}>
+            <View style={styles.recordingTimerBox}>
+              <Text style={styles.recordingDot}>🔴</Text>
+              <Text style={styles.recordingTimerText}>
+                Recording... 00:{voiceSecs.toString().padStart(2, '0')}
+              </Text>
+            </View>
 
-          <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendText()} disabled={isSending}>
-            <Text style={styles.sendIcon}>➔</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.cancelVoiceBtn} onPress={handleCancelVoiceRecording}>
+              <Text style={styles.cancelVoiceText}>🗑️ Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sendVoiceBtn} onPress={handleSendVoiceNote}>
+              <Text style={styles.sendVoiceText}>🚀 Send</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.inputBar}>
+            <TouchableOpacity style={styles.attachBtn} onPress={() => setAttachmentModalVisible(true)}>
+              <Text style={styles.attachIcon}>📎</Text>
+            </TouchableOpacity>
+
+            <TextInput
+              style={styles.input}
+              placeholder={replyingToMessage ? "Type your reply..." : "Message"}
+              placeholderTextColor="#94a3b8"
+              value={messageText}
+              onChangeText={setMessageText}
+              multiline
+            />
+
+            <TouchableOpacity style={styles.micBtn} onPress={handleStartVoiceRecording}>
+              <Text style={styles.micIcon}>🎙️</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sendBtn} onPress={() => handleSendText()} disabled={isSending}>
+              <Text style={styles.sendIcon}>➔</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </KeyboardAvoidingView>
+
+      {/* WhatsApp Attachment Sheet Modal (8 Grid Items + Drag Handle + Recent Media Strip) */}
+      <Modal visible={attachmentModalVisible} animationType="slide" transparent>
+        <TouchableOpacity
+          style={styles.modalBg}
+          activeOpacity={1}
+          onPress={() => setAttachmentModalVisible(false)}
+        >
+          <View style={styles.attachSheetContent}>
+            {/* Top Sheet Drag Handle */}
+            <View style={styles.sheetHandleBar} />
+
+            <View style={styles.attachGrid8Box}>
+              {/* Row 1 */}
+              <View style={styles.attachGridRow}>
+                <TouchableOpacity style={styles.attachGridCell} onPress={handlePickPhoto}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#0284c7' }]}>
+                    <Text style={styles.attachIconSymbol}>🖼️</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>Gallery</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.attachGridCell} onPress={handlePickPhoto}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#ec4899' }]}>
+                    <Text style={styles.attachIconSymbol}>📷</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>Camera</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.attachGridCell} onPress={() => { setAttachmentModalVisible(false); Alert.alert('Location', 'Sharing current GPS business coordinates...'); }}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#10b981' }]}>
+                    <Text style={styles.attachIconSymbol}>📍</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>Location</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.attachGridCell} onPress={() => { setAttachmentModalVisible(false); setParticipantModalVisible(true); }}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#38bdf8' }]}>
+                    <Text style={styles.attachIconSymbol}>👤</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>Contact</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Row 2 */}
+              <View style={styles.attachGridRow}>
+                <TouchableOpacity style={styles.attachGridCell} onPress={handlePickVideo}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#8b5cf6' }]}>
+                    <Text style={styles.attachIconSymbol}>📄</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>Document</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.attachGridCell} onPress={() => { setAttachmentModalVisible(false); setQuickCatalogVisible(true); }}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#eab308' }]}>
+                    <Text style={styles.attachIconSymbol}>📊</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>Poll</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.attachGridCell} onPress={() => { setAttachmentModalVisible(false); setQuickCatalogVisible(true); }}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#f43f5e' }]}>
+                    <Text style={styles.attachIconSymbol}>📅</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>Event</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.attachGridCell} onPress={handlePickPhoto}>
+                  <View style={[styles.attachIconCircle, { backgroundColor: '#06b6d4' }]}>
+                    <Text style={styles.attachIconSymbol}>🪄</Text>
+                  </View>
+                  <Text style={styles.attachCellLabel}>AI images</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Bottom Strip: Recent Media Thumbnails */}
+            <View style={styles.recentMediaStripSection}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentMediaRow}>
+                {[
+                  'https://via.placeholder.com/150/0284c7/ffffff?text=Gallery+1',
+                  'https://via.placeholder.com/150/10b981/ffffff?text=Gallery+2',
+                  'https://via.placeholder.com/150/ec4899/ffffff?text=Gallery+3',
+                  'https://via.placeholder.com/150/8b5cf6/ffffff?text=Gallery+4',
+                ].map((url, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={styles.recentThumbBox}
+                    onPress={() => {
+                      setAttachmentModalVisible(false);
+                      handleSendText('📷 Photo Attachment', undefined, url);
+                    }}
+                  >
+                    <Image source={{ uri: url }} style={styles.recentThumbImg} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Media Lightbox Fullscreen Preview Modal */}
+      <Modal visible={Boolean(previewMediaUrl)} animationType="fade" transparent>
+        <View style={styles.lightboxBg}>
+          <TouchableOpacity style={styles.lightboxCloseBtn} onPress={() => setPreviewMediaUrl(null)}>
+            <Text style={styles.lightboxCloseText}>✕ Close</Text>
+          </TouchableOpacity>
+          {previewMediaUrl && (
+            <Image source={{ uri: previewMediaUrl }} style={styles.lightboxImage} resizeMode="contain" />
+          )}
+        </View>
+      </Modal>
 
       {/* Opposite Person / Business Profile Modal */}
       <Modal visible={participantModalVisible} animationType="slide" transparent>
@@ -599,6 +1144,110 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </View>
       </Modal>
+
+      {/* WhatsApp Message Action Sheet (Reply, Forward, React, Copy) */}
+      <Modal visible={Boolean(selectedMsgActions)} animationType="fade" transparent>
+        <TouchableOpacity
+          style={styles.modalBg}
+          activeOpacity={1}
+          onPress={() => setSelectedMsgActions(null)}
+        >
+          <View style={styles.actionSheetContent}>
+            <Text style={styles.actionSheetTitle}>Message Options</Text>
+
+            <TouchableOpacity
+              style={styles.actionSheetRow}
+              onPress={() => {
+                setReplyingToMessage(selectedMsgActions);
+                setSelectedMsgActions(null);
+              }}
+            >
+              <Text style={styles.actionSheetIcon}>↩️</Text>
+              <Text style={styles.actionSheetLabel}>Reply</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionSheetRow}
+              onPress={() => {
+                setForwardingMessage(selectedMsgActions);
+                setForwardModalVisible(true);
+                setSelectedMsgActions(null);
+              }}
+            >
+              <Text style={styles.actionSheetIcon}>↪️</Text>
+              <Text style={styles.actionSheetLabel}>Forward</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionSheetRow}
+              onPress={() => {
+                if (selectedMsgActions) {
+                  toggleReaction({ messageId: selectedMsgActions.id, emoji: '❤️' });
+                }
+                setSelectedMsgActions(null);
+              }}
+            >
+              <Text style={styles.actionSheetIcon}>❤️</Text>
+              <Text style={styles.actionSheetLabel}>React with Heart</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionSheetRow}
+              onPress={() => setSelectedMsgActions(null)}
+            >
+              <Text style={styles.actionSheetIcon}>✕</Text>
+              <Text style={styles.actionSheetCancelLabel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* WhatsApp Forward Selection Modal */}
+      <Modal visible={forwardModalVisible} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <View style={styles.partModalHeader}>
+              <Text style={styles.modalTitle}>↪️ Forward Message</Text>
+              <TouchableOpacity onPress={() => setForwardModalVisible(false)}>
+                <Text style={styles.partCloseText}>✕ Close</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSub}>
+              Select a conversation participant to forward this message to:
+            </Text>
+
+            <FlatList
+              data={conversationsData?.conversations || []}
+              keyExtractor={(item, idx) => item.conversationId || item.id || String(idx)}
+              style={{ maxHeight: 320 }}
+              renderItem={({ item }) => {
+                const partnerName = item.participant?.fullName || item.participant?.shopName || item.otherUser?.fullName || 'Business User';
+                const partnerId = item.participant?.userId || item.otherUser?.id || item.user2Id || '';
+                return (
+                  <TouchableOpacity
+                    style={styles.forwardRowItem}
+                    onPress={() => handleForwardMessageToRecipient(partnerId, partnerName)}
+                  >
+                    <View style={styles.forwardAvatarCircle}>
+                      <Text style={styles.forwardAvatarInitials}>
+                        {partnerName.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.forwardContactName}>{partnerName}</Text>
+                      <Text style={styles.forwardContactSub}>{item.participant?.shopName || 'Trade Partner'}</Text>
+                    </View>
+
+                    <Text style={styles.forwardSendBadge}>Send ➔</Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -835,6 +1484,17 @@ const styles = StyleSheet.create({
     borderColor: '#6366f1',
   },
   openStoreHeaderText: { color: '#a5b4fc', fontSize: 11, fontWeight: '900' },
+  callHeaderBtn: {
+    backgroundColor: '#16a34a',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  callHeaderBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+  },
 
   ctaDoubleRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   callCtaBtnFlex: {
@@ -956,4 +1616,300 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   openStoreText: { color: '#a5b4fc', fontSize: 12, fontWeight: '800' },
+
+  /* WhatsApp Voice Note Card & Media Styles */
+  voiceNoteBubbleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    backgroundColor: colors.surfaceLight,
+    borderRadius: borderRadius.md,
+    gap: spacing.sm,
+    minWidth: 200,
+  },
+  voicePlayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voicePlayIcon: { fontSize: 16 },
+  voiceWaveformBox: { flex: 1 },
+  voiceWaveformLine: { color: colors.primaryLight, fontSize: 12, fontWeight: '900', letterSpacing: 2 },
+  voiceMetaSub: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
+
+  videoCardContainer: {
+    position: 'relative',
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  videoPlaceholder: {
+    width: 200,
+    height: 120,
+    backgroundColor: colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.md,
+  },
+  playBadgeIcon: { fontSize: 32 },
+  videoOverlayTag: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    backgroundColor: colors.overlay,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: borderRadius.xs,
+  },
+  videoOverlayText: { color: colors.textMain, fontSize: 10, fontWeight: '800' },
+
+  micBtn: {
+    padding: spacing.xs,
+    marginRight: spacing.xs,
+  },
+  micIcon: { fontSize: 20 },
+
+  voiceRecordingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  recordingTimerBox: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  recordingDot: { fontSize: 12 },
+  recordingTimerText: { color: colors.error, fontSize: 13, fontWeight: '800' },
+  cancelVoiceBtn: {
+    backgroundColor: colors.surfaceLight,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.md,
+  },
+  cancelVoiceText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
+  sendVoiceBtn: {
+    backgroundColor: colors.success,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.md,
+  },
+  sendVoiceText: { color: colors.textMain, fontSize: 12, fontWeight: '900' },
+
+  /* WhatsApp Attachment Sheet Styles */
+  attachSheetContent: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  attachSheetTitle: { color: colors.textMain, fontSize: 16, fontWeight: '900', marginBottom: spacing.lg },
+  attachGrid: { flexDirection: 'row', justifyContent: 'space-around' },
+  attachGridItem: { alignItems: 'center', gap: spacing.xs },
+  attachGridIconBox: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachGridIcon: { fontSize: 24 },
+  attachGridLabel: { color: colors.textLight, fontSize: 12, fontWeight: '700' },
+
+  /* Lightbox Fullscreen Styles */
+  lightboxBg: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+  },
+  lightboxCloseBtn: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    zIndex: 10,
+  },
+  lightboxCloseText: { color: colors.textMain, fontSize: 14, fontWeight: '800' },
+  lightboxImage: { width: '100%', height: '80%' },
+
+  // Forwarded & Quoted Inside Styles
+  forwardedHeaderTag: { marginBottom: 2 },
+  forwardedHeaderText: { color: '#94a3b8', fontSize: 10, fontStyle: 'italic', fontWeight: '600' },
+  quotedInsideBox: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 6,
+    padding: 6,
+    marginBottom: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#38bdf8',
+  },
+  quotedInsideAccentBar: { width: 0 },
+  quotedInsideSender: { color: '#38bdf8', fontSize: 11, fontWeight: '700' },
+  quotedInsideText: { color: '#cbd5e1', fontSize: 11 },
+
+  // Quoted Reply Preview Banner
+  replyPreviewBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#38bdf8',
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+  },
+  replyPreviewAccentBar: { width: 0 },
+  replyPreviewSender: { color: '#38bdf8', fontSize: 11, fontWeight: '700' },
+  replyPreviewText: { color: '#cbd5e1', fontSize: 11 },
+  replyPreviewCloseBtn: { padding: 6 },
+  replyPreviewCloseText: { color: '#94a3b8', fontSize: 14, fontWeight: '700' },
+
+  // Action Sheet Modal
+  actionSheetContent: {
+    backgroundColor: '#0f172a',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+    width: '90%',
+    alignSelf: 'center',
+  },
+  actionSheetTitle: { color: '#f8fafc', fontSize: 16, fontWeight: '800', marginBottom: 14, textAlign: 'center' },
+  actionSheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    gap: 12,
+  },
+  actionSheetIcon: { fontSize: 18 },
+  actionSheetLabel: { color: '#f8fafc', fontSize: 14, fontWeight: '600' },
+  actionSheetCancelLabel: { color: '#ef4444', fontSize: 14, fontWeight: '700' },
+
+  // Forward Modal Items
+  forwardRowItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    gap: 10,
+  },
+  forwardAvatarCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  forwardAvatarInitials: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  forwardContactName: { color: '#f8fafc', fontSize: 13, fontWeight: '700' },
+  forwardContactSub: { color: '#64748b', fontSize: 11 },
+  forwardSendBadge: { color: '#38bdf8', fontSize: 12, fontWeight: '800' },
+
+  /* WhatsApp Selection Header Bar */
+  selectedHeaderBar: {
+    height: 56,
+    backgroundColor: '#0f172a',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
+  selectedHeaderLeftRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  selectedHeaderBackText: { color: '#38bdf8', fontSize: 20, fontWeight: '800' },
+  selectedHeaderCountText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  selectedHeaderActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  selectedHeaderActionBtn: {
+    backgroundColor: '#1e293b',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  selectedHeaderActionIcon: { color: '#38bdf8', fontSize: 12, fontWeight: '800' },
+  selectedBubbleHighlight: {
+    backgroundColor: 'rgba(56, 189, 248, 0.25)',
+    borderColor: '#38bdf8',
+    borderWidth: 1,
+  },
+
+  /* Side Quick 1-Tap Action Icons */
+  sideQuickActionCol: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 4 },
+  sideActionIconBtn: {
+    padding: 4,
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  sideActionIconText: { fontSize: 12 },
+
+  // Flashing highlight when original message is jumped to
+  flashHighlightBubble: {
+    backgroundColor: '#1e3a8a',
+    borderColor: '#60a5fa',
+    borderWidth: 1.5,
+  },
+
+  // Outer Media Quick Forward Button (➦)
+  mediaOuterForwardBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#0f172a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  mediaOuterForwardIcon: { color: '#ffffff', fontSize: 14, fontWeight: '900' },
+
+  // Sheet Drag Handle Bar
+  sheetHandleBar: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#475569',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+
+  // 8 Icon Grid Layout
+  attachGrid8Box: { gap: 16, marginBottom: 16 },
+  attachGridRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  attachGridCell: { alignItems: 'center', width: 72 },
+  attachIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  attachIconSymbol: { fontSize: 22 },
+  attachCellLabel: { color: '#cbd5e1', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+
+  // Recent Media Horizontal Strip
+  recentMediaStripSection: { borderTopWidth: 1, borderTopColor: '#1e293b', paddingTop: 12, marginTop: 4 },
+  recentMediaRow: { gap: 8, paddingHorizontal: 4 },
+  recentThumbBox: { width: 68, height: 68, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
+  recentThumbImg: { width: '100%', height: '100%' },
 });
+

@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Linking from 'expo-linking';
 import { RootStackParamList } from '../types/navigation.types';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { authService } from '../services/auth/authService';
 import { PushNotificationService } from '../services/notifications/pushNotificationService';
+import { socketService } from '../services/socket/socketService';
 import { AuthNavigator } from './AuthNavigator';
 import { MainNavigator } from './MainNavigator';
 import { SplashScreen } from '../screens/auth/SplashScreen';
@@ -16,6 +17,10 @@ import { ProductDetailScreen } from '../screens/ProductDetailScreen';
 import { CreateStatusScreen } from '../screens/CreateStatusScreen';
 import { BroadcastListScreen } from '../screens/BroadcastListScreen';
 import { SubscriptionScreen } from '../screens/SubscriptionScreen';
+import { CallScreen } from '../screens/CallScreen';
+import { CallHistoryScreen } from '../screens/CallHistoryScreen';
+
+export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -52,6 +57,25 @@ export const RootNavigator: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated && user?.isVerified) {
       PushNotificationService.registerForPushNotifications();
+
+      // Connect socket & listen for incoming calls globally
+      socketService.connect();
+      socketService.on('call:incoming', (callData: any) => {
+        console.log('📞 GLOBAL INCOMING CALL RECEIVED:', callData);
+        if (navigationRef.isReady()) {
+          navigationRef.navigate('Call', {
+            recipientId: callData.callerUserId,
+            recipientName: callData.callerShopName || callData.callerName || 'Supplier',
+            recipientAvatar: callData.callerAvatar,
+            callType: callData.callType || 'AUDIO',
+            isIncoming: true,
+          });
+        }
+      });
+
+      return () => {
+        socketService.off('call:incoming');
+      };
     }
   }, [isAuthenticated, user?.isVerified]);
 
@@ -64,7 +88,7 @@ export const RootNavigator: React.FC = () => {
   const isBlockedOrPending = !user || isBlocked || !isApproved;
 
   return (
-    <NavigationContainer linking={linking}>
+    <NavigationContainer ref={navigationRef} linking={linking}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isAuthenticated ? (
           <Stack.Screen name="Auth" component={AuthNavigator} />
@@ -79,6 +103,8 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="CreateStatus" component={CreateStatusScreen} />
             <Stack.Screen name="BroadcastList" component={BroadcastListScreen} />
             <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+            <Stack.Screen name="Call" component={CallScreen} />
+            <Stack.Screen name="CallHistory" component={CallHistoryScreen} />
           </>
         )}
       </Stack.Navigator>

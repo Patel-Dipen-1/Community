@@ -20,15 +20,32 @@ export interface StatusItem {
     verificationTag: boolean;
   };
   viewsCount?: number;
+  views?: Array<{ viewerId: string; viewedAt?: string }>;
   likesCount?: number;
   createdAt: string;
+}
+
+export interface StatusViewer {
+  viewerId: string;
+  fullName: string;
+  mobileNumber?: string;
+  shopName?: string;
+  allowedCommunities?: string[];
+  viewedAt: string;
+}
+
+export interface StatusViewersResponse {
+  success: boolean;
+  statusId: string;
+  totalViews: number;
+  viewers: StatusViewer[];
 }
 
 export const statusApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     getStatuses: builder.query<{ statuses: StatusItem[] }, { category?: string }>({
       query: (params) => ({
-        url: '/status',
+        url: '/status/feed',
         params,
       }),
       providesTags: ['Status'],
@@ -36,7 +53,7 @@ export const statusApi = baseApi.injectEndpoints({
 
     createStatus: builder.mutation<{ message: string; status: StatusItem }, Partial<StatusItem>>({
       query: (data) => ({
-        url: '/status',
+        url: '/status/create',
         method: 'POST',
         body: data,
       }),
@@ -49,6 +66,10 @@ export const statusApi = baseApi.injectEndpoints({
         method: 'POST',
       }),
     }),
+
+    getStatusViewers: builder.query<StatusViewersResponse, string>({
+      query: (statusId) => `/status/${statusId}/viewers`,
+    }),
   }),
 });
 
@@ -56,4 +77,6 @@ export const {
   useGetStatusesQuery,
   useCreateStatusMutation,
   useViewStatusMutation,
+  useGetStatusViewersQuery,
 } = statusApi;
+

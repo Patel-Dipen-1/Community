@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar, Platform } from 'react-native';
+import { colors, typography, spacing } from '../../theme/theme';
 
 interface HeaderProps {
   title: string;
@@ -51,7 +52,7 @@ export const Header: React.FC<HeaderProps> = ({
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: '#020617',
+    backgroundColor: colors.background,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 10 : 0,
   },
   container: {
@@ -59,10 +60,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    backgroundColor: '#020617',
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: colors.border,
   },
   leftContainer: {
     flexDirection: 'row',
@@ -70,25 +71,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backButton: {
-    paddingRight: 12,
-    paddingVertical: 6,
+    paddingRight: spacing.md,
+    paddingVertical: spacing.xs,
   },
   backIcon: {
-    color: '#818cf8',
-    fontSize: 22,
-    fontWeight: '900',
+    color: colors.primaryLight,
+    fontSize: typography.fontSize.xxl,
+    fontWeight: typography.fontWeight.heavy,
   },
   titleContainer: {
     flex: 1,
   },
   title: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
+    color: colors.textMain,
+    fontSize: typography.fontSize.xl,
+    fontWeight: typography.fontWeight.bold,
   },
   subtitle: {
-    color: '#94a3b8',
-    fontSize: 11,
+    color: colors.textMuted,
+    fontSize: typography.fontSize.sm,
     marginTop: 1,
   },
   rightContainer: {

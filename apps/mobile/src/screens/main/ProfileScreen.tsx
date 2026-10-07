@@ -11,6 +11,7 @@ import {
   Image,
   FlatList,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainTabParamList, RootStackParamList } from '../../types/navigation.types';
@@ -21,7 +22,7 @@ import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { authService } from '../../services/auth/authService';
 import { useGetMyStoreQuery } from '../../store/api/storeApi';
 import { useCreateProductMutation } from '../../store/api/productApi';
-import { useUpdateProfileMutation as useUpdateUserProfileMutation } from '../../services/api/authApi';
+import { useUpdateProfileMutation as useUpdateUserProfileMutation, useGetProfileQuery } from '../../services/api/authApi';
 
 type Props = NativeStackScreenProps<MainTabParamList & RootStackParamList, 'Profile'>;
 
@@ -30,12 +31,18 @@ const GRID_COLUMN_WIDTH = (width - 48) / 3; // 3-column layout grid
 
 export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const dispatch = useAppDispatch();
-  const { user } = useAppSelector((state) => state.auth);
+  const { user: authUser } = useAppSelector((state) => state.auth);
 
-  // Fetch dynamic store and product catalog data
+  // Profile and Store queries with refetch capabilities
+  const { data: profileData, refetch: refetchProfile } = useGetProfileQuery();
   const { data: storeData, isLoading: isStoreLoading, refetch: refetchStore } = useGetMyStoreQuery();
   const [updateUserProfile] = useUpdateUserProfileMutation();
   const [createProduct, { isLoading: isCreatingProduct }] = useCreateProductMutation();
+
+  const user = profileData?.user || authUser;
+
+  // Refresh Control state
+  const [refreshing, setRefreshing] = useState(false);
 
   // Modals state
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -45,8 +52,13 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [editProfileModal, setEditProfileModal] = useState(false);
   const [editFullName, setEditFullName] = useState(user?.fullName || '');
   const [editShopName, setEditShopName] = useState(user?.business?.shopName || '');
+  const [editStreetAddress, setEditStreetAddress] = useState(user?.business?.streetAddress || '');
   const [editCity, setEditCity] = useState(user?.business?.city || '');
   const [editState, setEditState] = useState(user?.business?.state || '');
+  const [editPincode, setEditPincode] = useState(user?.business?.pincode || '');
+  const [editGstNumber, setEditGstNumber] = useState(user?.business?.gstNumber || '');
+  const [editBio, setEditBio] = useState('');
+  const [editTradeTerms, setEditTradeTerms] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const [addProductModal, setAddProductModal] = useState(false);
@@ -54,6 +66,30 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [prodPrice, setProdPrice] = useState('');
   const [prodMOQ, setProdMOQ] = useState('100');
   const [prodImage, setProdImage] = useState('');
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refetchStore(), refetchProfile()]);
+    } catch (err) {
+      console.log('Profile pull-to-refresh error:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleOpenEditProfile = () => {
+    setEditFullName(user?.fullName || '');
+    setEditShopName(user?.business?.shopName || '');
+    setEditStreetAddress(user?.business?.streetAddress || '');
+    setEditCity(user?.business?.city || '');
+    setEditState(user?.business?.state || '');
+    setEditPincode(user?.business?.pincode || '');
+    setEditGstNumber(user?.business?.gstNumber && user?.business?.gstNumber !== 'N/A' ? user.business.gstNumber : '');
+    setEditBio(storeData?.store?.bio || '');
+    setEditTradeTerms((user?.business as any)?.tradeTerms || '');
+    setEditProfileModal(true);
+  };
 
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to log out of your account?', [
@@ -76,12 +112,17 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       await updateUserProfile({
         fullName: editFullName.trim(),
         shopName: editShopName.trim(),
+        streetAddress: editStreetAddress.trim(),
         city: editCity.trim(),
         state: editState.trim(),
+        pincode: editPincode.trim(),
+        gstNumber: editGstNumber.trim() || undefined,
+        tradeTerms: editTradeTerms.trim() || undefined,
       } as any).unwrap();
       setIsSavingProfile(false);
       setEditProfileModal(false);
-      Alert.alert('Success', 'Business profile updated successfully!');
+      await Promise.all([refetchStore(), refetchProfile()]);
+      Alert.alert('Success', 'Business profile credentials updated!');
     } catch (err: any) {
       setIsSavingProfile(false);
       Alert.alert('Update Failed', err?.data?.error || 'Unable to update profile.');
@@ -148,7 +189,18 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         }
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#818cf8"
+            colors={['#818cf8', '#4f46e5']}
+          />
+        }
+      >
         {/* 1. Profile Hero Section */}
         <View style={styles.heroCard}>
           <View style={styles.heroGlowCircle} />
@@ -191,7 +243,7 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
           {/* Hero CTAs */}
           <View style={styles.heroCtaRow}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => setEditProfileModal(true)}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleOpenEditProfile}>
               <Text style={styles.primaryBtnText}>✏️ Edit Profile</Text>
             </TouchableOpacity>
 
@@ -215,7 +267,7 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.cardHeaderIcon}>🏷️</Text>
               <Text style={styles.cardHeaderTitle}>Business Credentials</Text>
             </View>
-            <TouchableOpacity onPress={() => setEditProfileModal(true)}>
+            <TouchableOpacity onPress={handleOpenEditProfile}>
               <Text style={styles.editLinkText}>✏️ Edit</Text>
             </TouchableOpacity>
           </View>
@@ -256,10 +308,17 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
               </View>
               <View style={styles.taxPillRow}>
                 <View style={styles.taxPill}>
-                  <Text style={styles.taxPillText}>GSTIN: <Text style={styles.taxPillCode}>{biz?.gstNumber || '24AAACR1234F1Z5'}</Text></Text>
+                  <Text style={styles.taxPillText}>
+                    GSTIN:{' '}
+                    <Text style={styles.taxPillCode}>
+                      {biz?.gstNumber && biz.gstNumber !== 'N/A' ? biz.gstNumber : 'N/A (Not Filed)'}
+                    </Text>
+                  </Text>
                 </View>
                 <View style={styles.taxPill}>
-                  <Text style={styles.taxPillText}>PAN: <Text style={styles.taxPillCode}>AABCS5678K</Text></Text>
+                  <Text style={styles.taxPillText}>
+                    PAN: <Text style={styles.taxPillCode}>AABCS5678K</Text>
+                  </Text>
                 </View>
               </View>
             </View>
@@ -268,7 +327,14 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.termsBox}>
               <Text style={styles.termsTitle}>WHOLESALE TRADE TERMS</Text>
               <Text style={styles.termsText}>
-                Min. Order: <Text style={styles.boldWhite}>₹50,000</Text> • Payment: <Text style={styles.boldWhite}>20% Adv, Escrow Protected</Text>
+                {(biz as any)?.tradeTerms ? (
+                  (biz as any).tradeTerms
+                ) : (
+                  <>
+                    Min. Order: <Text style={styles.boldWhite}>₹50,000</Text> • Payment:{' '}
+                    <Text style={styles.boldWhite}>20% Adv, Escrow Protected</Text>
+                  </>
+                )}
               </Text>
             </View>
           </View>
@@ -374,6 +440,18 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
           <TouchableOpacity
             style={styles.menuRow}
+            onPress={() => navigation.navigate('CallHistory')}
+          >
+            <Text style={styles.menuIconText}>📋</Text>
+            <View style={styles.menuMetaBox}>
+              <Text style={styles.menuTitleText}>Call Logs & History</Text>
+              <Text style={styles.menuSubText}>View incoming, outgoing, and missed call history</Text>
+            </View>
+            <Text style={styles.menuArrow}>➔</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuRow}
             onPress={() => Linking.openURL('tel:' + (user?.mobileNumber || '9876543210'))}
           >
             <Text style={styles.menuIconText}>📞</Text>
@@ -398,18 +476,32 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       {/* Modal 1: Edit Profile */}
       <Modal visible={editProfileModal} animationType="slide" transparent>
         <View style={styles.modalBg}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitleBlue}>✏️ Edit Business Profile</Text>
-            <Input label="Owner Name *" value={editFullName} onChangeText={setEditFullName} />
-            <Input label="Shop / Business Name *" value={editShopName} onChangeText={setEditShopName} />
-            <Input label="City" value={editCity} onChangeText={setEditCity} />
-            <Input label="State" value={editState} onChangeText={setEditState} />
+          <ScrollView contentContainerStyle={styles.modalScroll}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitleBlue}>✏️ Edit Business Credentials</Text>
+              <Input label="Legal Owner Name *" placeholder="e.g. Dipen Patel" value={editFullName} onChangeText={setEditFullName} />
+              <Input label="Shop / Business Name *" placeholder="e.g. Royal Textiles" value={editShopName} onChangeText={setEditShopName} />
+              <Input label="Street Address" placeholder="e.g. GIDC Ring Road Market" value={editStreetAddress} onChangeText={setEditStreetAddress} />
+              
+              <View style={styles.inputRowDouble}>
+                <View style={{ flex: 1 }}>
+                  <Input label="City" placeholder="e.g. Surat" value={editCity} onChangeText={setEditCity} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Input label="State" placeholder="e.g. Gujarat" value={editState} onChangeText={setEditState} />
+                </View>
+              </View>
 
-            <View style={styles.modalActions}>
-              <Button title="Cancel" variant="secondary" onPress={() => setEditProfileModal(false)} style={{ flex: 1 }} />
-              <Button title="Save Changes" loading={isSavingProfile} onPress={handleSaveProfile} style={{ flex: 1 }} />
+              <Input label="Pincode" placeholder="e.g. 395002" keyboardType="numeric" value={editPincode} onChangeText={setEditPincode} />
+              <Input label="GST Number (Leave blank if not filed)" placeholder="e.g. 24AAAAA0000A1Z5" value={editGstNumber} onChangeText={setEditGstNumber} />
+              <Input label="Wholesale Trade Terms / Policy" placeholder="e.g. Min Order ₹50,000 • 20% Advance" value={editTradeTerms} onChangeText={setEditTradeTerms} multiline numberOfLines={2} />
+
+              <View style={styles.modalActions}>
+                <Button title="Cancel" variant="secondary" onPress={() => setEditProfileModal(false)} style={{ flex: 1 }} />
+                <Button title="Save Credentials" loading={isSavingProfile} onPress={handleSaveProfile} style={{ flex: 1 }} />
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -699,10 +791,12 @@ const styles = StyleSheet.create({
 
   // Modals
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 },
+  modalScroll: { flexGrow: 1, justifyContent: 'center', paddingVertical: 20 },
   modalContent: { backgroundColor: '#0f172a', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#334155' },
   modalTitleBlue: { color: '#818cf8', fontSize: 18, fontWeight: '900', marginBottom: 12 },
   modalTitleDanger: { color: '#fb7185', fontSize: 18, fontWeight: '900', marginBottom: 4 },
   modalSub: { color: '#94a3b8', fontSize: 12, marginBottom: 16 },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  inputRowDouble: { flexDirection: 'row', gap: 10 },
 });
 

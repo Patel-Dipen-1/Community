@@ -32,6 +32,7 @@ const PROD_SOCKET_URL = 'https://communityapi.radheytechsolutions.com';
 export const ENV_CONFIG = {
   API_BASE_URL: process.env.EXPO_PUBLIC_API_URL || PROD_API_URL,
   SOCKET_URL: process.env.EXPO_PUBLIC_SOCKET_URL || PROD_SOCKET_URL,
+  LIVEKIT_URL: process.env.EXPO_PUBLIC_LIVEKIT_URL || 'wss://rtc.radheytechsolutions.com',
   DEV_API_URL,
   APP_NAME: 'B2B Community Platform',
   APP_VERSION: '1.0.0',

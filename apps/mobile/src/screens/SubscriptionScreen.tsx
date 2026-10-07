@@ -11,9 +11,8 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import { RootStackParamList } from '../types/navigation.types';
-import { Header } from '../components/common/Header';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { Header, Input, Button, PageTitle, SectionTitle, MutedText, BodyText } from '../components/common';
+import { colors, spacing, borderRadius } from '../theme/theme';
 import { useGetSubscriptionQuery, useSubmitPaymentProofMutation } from '../store/api/subscriptionApi';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Subscription'>;
@@ -68,44 +67,44 @@ export const SubscriptionScreen: React.FC<Props> = ({ navigation }) => {
         {/* Status Card */}
         <View style={styles.statusCard}>
           <Text style={styles.cardHeader}>CURRENT MEMBERSHIP STATUS</Text>
-          <Text style={styles.planTitle}>{sub?.planName || 'Enterprise Pro Plan'}</Text>
+          <PageTitle style={styles.planTitle}>{sub?.planName || 'Enterprise Pro Plan'}</PageTitle>
           <View style={styles.badgeRow}>
             <Text style={sub?.status === 'ACTIVE' ? styles.activeBadge : styles.trialBadge}>
               ● {sub?.status || 'TRIAL PERIOD'}
             </Text>
           </View>
-          <Text style={styles.periodText}>
+          <MutedText style={styles.periodText}>
             Trial Period Ends: {sub?.trialEndsAt ? new Date(sub.trialEndsAt).toLocaleDateString() : 'Active 14 Days'}
-          </Text>
+          </MutedText>
         </View>
 
         {/* Pricing Plan Info */}
         <View style={styles.planCard}>
           <Text style={styles.planHeader}>Enterprise Membership • ₹4,999 / Year</Text>
-          <Text style={styles.featBullet}>✓ Unlimited Verified SKU Catalog Uploads</Text>
-          <Text style={styles.featBullet}>✓ WhatsApp Broadcast Lists & Direct Messages</Text>
-          <Text style={styles.featBullet}>✓ 5-Session Concurrent Business Login Limit</Text>
-          <Text style={styles.featBullet}>✓ Category Specification Isolation & Support</Text>
+          <BodyText style={styles.featBullet}>✓ Unlimited Verified SKU Catalog Uploads</BodyText>
+          <BodyText style={styles.featBullet}>✓ WhatsApp Broadcast Lists & Direct Messages</BodyText>
+          <BodyText style={styles.featBullet}>✓ 5-Session Concurrent Business Login Limit</BodyText>
+          <BodyText style={styles.featBullet}>✓ Category Specification Isolation & Support</BodyText>
 
           <Button
             title="Submit UPI / Bank Payment Proof"
             onPress={() => setModalVisible(true)}
-            style={{ marginTop: 16 }}
+            style={{ marginTop: spacing.lg }}
           />
         </View>
 
         {/* Transaction History */}
-        <Text style={styles.secTitle}>Payment Transaction History</Text>
+        <SectionTitle style={styles.secTitle}>Payment Transaction History</SectionTitle>
         {isLoading ? (
-          <Text style={styles.loadingText}>Loading payment transactions...</Text>
+          <MutedText style={styles.loadingText}>Loading payment transactions...</MutedText>
         ) : data?.transactions?.length === 0 ? (
-          <Text style={styles.emptyText}>No previous payment records found.</Text>
+          <MutedText style={styles.emptyText}>No previous payment records found.</MutedText>
         ) : (
           data?.transactions?.map((tx) => (
             <View key={tx.id} style={styles.txRow}>
               <View>
-                <Text style={styles.txTitle}>{tx.cycleName}</Text>
-                <Text style={styles.txInv}>Invoice #{tx.invoiceNumber}</Text>
+                <BodyText style={styles.txTitle}>{tx.cycleName}</BodyText>
+                <MutedText style={styles.txInv}>Invoice #{tx.invoiceNumber}</MutedText>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={styles.txAmount}>₹{tx.amount}</Text>
@@ -120,10 +119,10 @@ export const SubscriptionScreen: React.FC<Props> = ({ navigation }) => {
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>💳 Submit Payment Proof</Text>
-            <Text style={styles.modalSub}>
+            <SectionTitle style={styles.modalTitle}>💳 Submit Payment Proof</SectionTitle>
+            <MutedText style={styles.modalSub}>
               Pay via UPI / Bank Transfer and submit screenshot / UTR number for admin verification.
-            </Text>
+            </MutedText>
 
             <Input
               label="UPI Transaction Reference / UTR Number"
@@ -150,31 +149,32 @@ export const SubscriptionScreen: React.FC<Props> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  scrollContent: { padding: 16 },
-  statusCard: { backgroundColor: '#0f172a', borderRadius: 16, borderWidth: 1, borderColor: '#1e293b', padding: 16, marginBottom: 14 },
-  cardHeader: { color: '#64748b', fontSize: 10, fontWeight: '800' },
-  planTitle: { color: '#ffffff', fontSize: 20, fontWeight: '900', marginTop: 4 },
-  badgeRow: { marginTop: 6 },
-  activeBadge: { color: '#34d399', fontSize: 12, fontWeight: '800' },
-  trialBadge: { color: '#fbbf24', fontSize: 12, fontWeight: '800' },
-  periodText: { color: '#94a3b8', fontSize: 12, marginTop: 8 },
-  planCard: { backgroundColor: '#1e1b4b', borderRadius: 16, borderWidth: 1, borderColor: '#4338ca', padding: 16, marginBottom: 16 },
-  planHeader: { color: '#ffffff', fontSize: 16, fontWeight: '900', marginBottom: 10 },
-  featBullet: { color: '#cbd5e1', fontSize: 12, marginBottom: 4 },
-  secTitle: { color: '#ffffff', fontSize: 15, fontWeight: '800', marginBottom: 10 },
-  loadingText: { color: '#94a3b8' },
-  emptyText: { color: '#64748b', fontStyle: 'italic' },
-  txRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#0f172a', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b', marginBottom: 8 },
-  txTitle: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
-  txInv: { color: '#64748b', fontSize: 11, marginTop: 2 },
-  txAmount: { color: '#34d399', fontSize: 14, fontWeight: '900' },
-  txStatus: { color: '#818cf8', fontSize: 10, fontWeight: '800', marginTop: 2 },
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#0f172a', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#334155' },
-  modalTitle: { color: '#ffffff', fontSize: 18, fontWeight: '900', marginBottom: 4 },
-  modalSub: { color: '#94a3b8', fontSize: 12, marginBottom: 16 },
-  uploadBox: { backgroundColor: '#1e293b', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#334155', borderStyle: 'dashed' },
-  uploadText: { color: '#818cf8', fontSize: 12, fontWeight: '700' },
-  modalActions: { flexDirection: 'row', gap: 10 },
+  container: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { padding: spacing.lg },
+  statusCard: { backgroundColor: colors.card, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.lg, marginBottom: spacing.md },
+  cardHeader: { color: colors.textSubtle, fontSize: 10, fontWeight: '800' },
+  planTitle: { fontSize: 20, marginTop: spacing.xs },
+  badgeRow: { marginTop: spacing.xs },
+  activeBadge: { color: colors.accentLight, fontSize: 12, fontWeight: '800' },
+  trialBadge: { color: colors.warningLight, fontSize: 12, fontWeight: '800' },
+  periodText: { fontSize: 12, marginTop: spacing.sm },
+  planCard: { backgroundColor: colors.surfaceLight, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colors.primary, padding: spacing.lg, marginBottom: spacing.lg },
+  planHeader: { color: colors.textMain, fontSize: 16, fontWeight: '900', marginBottom: spacing.sm },
+  featBullet: { fontSize: 12, marginBottom: spacing.xs },
+  secTitle: { marginBottom: spacing.sm },
+  loadingText: { fontStyle: 'italic' },
+  emptyText: { fontStyle: 'italic' },
+  txRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: colors.card, padding: spacing.md, borderRadius: borderRadius.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm },
+  txTitle: { fontSize: 13, fontWeight: '700' },
+  txInv: { fontSize: 11, marginTop: 2 },
+  txAmount: { color: colors.accentLight, fontSize: 14, fontWeight: '900' },
+  txStatus: { color: colors.primaryLight, fontSize: 10, fontWeight: '800', marginTop: 2 },
+  modalBg: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', padding: spacing.xl },
+  modalContent: { backgroundColor: colors.surface, borderRadius: borderRadius.xl, padding: spacing.xl, borderWidth: 1, borderColor: colors.borderLight },
+  modalTitle: { fontSize: 18, marginBottom: spacing.xs },
+  modalSub: { fontSize: 12, marginBottom: spacing.lg },
+  uploadBox: { backgroundColor: colors.surfaceLight, borderRadius: borderRadius.md, padding: spacing.lg, alignItems: 'center', marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.borderLight, borderStyle: 'dashed' },
+  uploadText: { color: colors.primaryLight, fontSize: 12, fontWeight: '700' },
+  modalActions: { flexDirection: 'row', gap: spacing.sm },
 });
+

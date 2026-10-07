@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { colors, typography, borderRadius, spacing } from '../../theme/theme';
 
 interface EmptyStateProps {
   icon?: string;
@@ -32,38 +33,38 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    padding: 30,
+    padding: spacing.xl * 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 20,
+    marginVertical: spacing.xl,
   },
   icon: {
     fontSize: 48,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   title: {
-    color: '#f8fafc',
-    fontSize: 17,
-    fontWeight: '800',
+    color: colors.textSecondary,
+    fontSize: typography.fontSize.xl,
+    fontWeight: typography.fontWeight.bold,
     textAlign: 'center',
-    marginBottom: 6,
+    marginBottom: spacing.xs + 2,
   },
   description: {
-    color: '#94a3b8',
-    fontSize: 13,
+    color: colors.textMuted,
+    fontSize: typography.fontSize.base,
     textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 16,
+    lineHeight: typography.lineHeight.normal,
+    marginBottom: spacing.lg,
   },
   button: {
-    backgroundColor: '#4f46e5',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 12,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md - 2,
+    paddingHorizontal: spacing.xl,
+    borderRadius: borderRadius.md,
   },
   buttonText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
+    color: colors.textMain,
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.semibold,
   },
 });

@@ -9,9 +9,11 @@ router.get('/my-poster-config', authenticateToken, StatusController.getPosterCon
 
 // Post Status (Rule 1 Approval + Rules 2, 3, 4, 5 Category Assignment)
 router.post('/create', authenticateToken, StatusController.create);
+router.post('/', authenticateToken, StatusController.create);
 
 // Get Targeted Status Feed (Rules 2, 6, 7, 8 & Rule 10 Super Admin View)
 router.get('/feed', authenticateToken, StatusController.getFeed);
+router.get('/', authenticateToken, StatusController.getFeed);
 
 // Record View on Status (Rule 9 View Tracking)
 router.post('/:id/view', authenticateToken, StatusController.recordView);

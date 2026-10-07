@@ -18,10 +18,12 @@ router.post('/conversations', ChatController.getOrCreateConversation);
 
 // Get messages for a specific conversation
 router.get('/conversations/:id/messages', ChatController.getMessages);
+router.post('/conversations/:id/read', ChatController.markAsRead);
 
 // Send message to an existing conversation or directly
 router.post('/conversations/:id/messages', ChatController.sendMessage);
 router.post('/messages', ChatController.sendMessage);
+router.post('/messages/forward', ChatController.forwardMessage);
 
 // React to a message
 router.post('/messages/:id/react', ChatController.reactToMessage);

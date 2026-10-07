@@ -7,6 +7,7 @@ import {
   StyleSheet,
   TextInputProps,
 } from 'react-native';
+import { colors, typography, borderRadius, spacing } from '../../theme/theme';
 
 interface InputProps extends TextInputProps {
   label?: string;
@@ -31,7 +32,7 @@ export const Input: React.FC<InputProps> = ({
       <View style={[styles.inputWrapper, error ? styles.inputError : undefined]}>
         <TextInput
           style={[styles.input, style]}
-          placeholderTextColor="#64748b"
+          placeholderTextColor={colors.textSubtle}
           secureTextEntry={isPasswordField ? passwordHidden : false}
           {...props}
         />
@@ -53,45 +54,45 @@ export const Input: React.FC<InputProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   label: {
-    color: '#cbd5e1',
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 6,
+    color: colors.textLight,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    marginBottom: spacing.xs + 2,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#334155',
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    borderColor: colors.borderLight,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.lg - 2,
   },
   input: {
     flex: 1,
-    paddingVertical: 12,
-    color: '#ffffff',
-    fontSize: 14,
+    paddingVertical: spacing.md,
+    color: colors.textMain,
+    fontSize: typography.fontSize.md,
   },
   eyeBtn: {
-    paddingLeft: 10,
-    paddingVertical: 8,
+    paddingLeft: spacing.sm + 2,
+    paddingVertical: spacing.sm,
     justifyContent: 'center',
     alignItems: 'center',
   },
   eyeIcon: {
-    fontSize: 18,
+    fontSize: typography.fontSize.xl,
   },
   inputError: {
-    borderColor: '#f43f5e',
+    borderColor: colors.errorLight,
   },
   errorText: {
-    color: '#fb7185',
-    fontSize: 11,
-    marginTop: 4,
-    fontWeight: '600',
+    color: colors.errorLight,
+    fontSize: typography.fontSize.sm,
+    marginTop: spacing.xs,
+    fontWeight: typography.fontWeight.medium,
   },
 });

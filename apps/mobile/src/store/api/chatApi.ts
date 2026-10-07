@@ -12,7 +12,7 @@ export interface ChatMessage {
   isForwarded: boolean;
   isEdited: boolean;
   isDeleted: boolean;
-  status: 'SENT' | 'DELIVERED' | 'READ';
+  status?: 'PENDING' | 'SENT' | 'DELIVERED' | 'READ';
   reactions?: Array<{ userId: string; emoji: string }>;
   replyToMessage?: ChatMessage;
   sender?: {
@@ -107,6 +107,7 @@ export const chatApi = baseApi.injectEndpoints({
             text: arg.text,
             productCode: arg.productCode,
             mediaUrl: arg.mediaUrl,
+            replyToId: arg.replyToId,
             clientMessageId: arg.clientMessageId,
           },
         });
@@ -129,6 +130,18 @@ export const chatApi = baseApi.injectEndpoints({
       invalidatesTags: ['Conversations', 'Messages'],
     }),
 
+    forwardMessage: builder.mutation<
+      { success: boolean; forwardCount: number; isForwardedManyTimes: boolean; messages: ChatMessage[] },
+      { messageId: string; messageType?: 'DIRECT' | 'GROUP'; targetConversationIds?: string[]; targetGroupIds?: string[] }
+    >({
+      query: (body) => ({
+        url: '/chat/messages/forward',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Conversations', 'Messages'],
+    }),
+
     toggleReaction: builder.mutation<
       { message: ChatMessage },
       { messageId: string; emoji: string }
@@ -139,6 +152,17 @@ export const chatApi = baseApi.injectEndpoints({
         body: { emoji },
       }),
       invalidatesTags: ['Messages'],
+    }),
+
+    markConversationAsRead: builder.mutation<
+      { success: boolean; updatedCount?: number },
+      string
+    >({
+      query: (conversationId) => ({
+        url: `/chat/conversations/${conversationId}/read`,
+        method: 'POST',
+      }),
+      invalidatesTags: ['Conversations'],
     }),
 
     starMessage: builder.mutation<{ message: string }, string>({
@@ -154,6 +178,8 @@ export const {
   useGetConversationsQuery,
   useGetMessagesQuery,
   useSendMessageMutation,
+  useForwardMessageMutation,
   useToggleReactionMutation,
   useStarMessageMutation,
+  useMarkConversationAsReadMutation,
 } = chatApi;

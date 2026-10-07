@@ -10,6 +10,7 @@ import {
   useGetConversationMessagesQuery,
   useStartConversationMutation,
   useSendMessageMutation,
+  useForwardMessageMutation,
   useEditMessageMutation,
   ChatParticipant,
 } from '../../lib/redux/api/chatApi';
@@ -145,8 +146,15 @@ export function ChatModule() {
 
   const [startConversation, { isLoading: isStartingChat }] = useStartConversationMutation();
   const [sendMessage, { isLoading: isSendingMessage }] = useSendMessageMutation();
+  const [forwardMessageMutation, { isLoading: isForwardingMsg }] = useForwardMessageMutation();
   const [sendBroadcastMessage, { isLoading: isSendingBroadcast }] = useSendBroadcastMessageMutation();
   const [editMessageMutation, { isLoading: isEditingMessage }] = useEditMessageMutation();
+
+  // Reply & Forward State
+  const [replyingToMessage, setReplyingToMessage] = useState<{ id: string; text?: string; senderName?: string; productCode?: string } | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<any | null>(null);
+  const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
+  const [selectedForwardTargets, setSelectedForwardTargets] = useState<string[]>([]);
 
   const broadcastLists = broadcastListsData?.broadcastLists || [];
   const activeBroadcastList = activeBroadcastData?.broadcastList;
@@ -228,9 +236,21 @@ export function ChatModule() {
       }
     };
 
+    const handleStatusUpdate = (data: any) => {
+      if (data?.conversationId === activeConversationId) {
+        refetchMessages();
+      }
+    };
+
     s.on('receive_message', handleReceiveMessage);
+    s.on('message_status_update', handleStatusUpdate);
+
+    // Emit mark_read for this conversation
+    s.emit('mark_read', { conversationId: activeConversationId });
+
     return () => {
       s.off('receive_message', handleReceiveMessage);
+      s.off('message_status_update', handleStatusUpdate);
     };
   }, [activeConversationId, refetchMessages, refetchConversations]);
 
@@ -543,6 +563,8 @@ export function ChatModule() {
     return true;
   });
 
+  const reversedDisplayMessages = [...displayMessages].reverse();
+
   // Auto-recover messages if stale clearedAtTimestamp hides all conversation history
   useEffect(() => {
     if (messages.length > 0 && displayMessages.length === 0 && clearedAtTimestamp && activeConversationId) {
@@ -586,6 +608,7 @@ export function ChatModule() {
           text: messageText.trim() || undefined,
           productCode: productCodeInput.trim() || undefined,
           mediaUrl: firstMedia.url,
+          replyToId: replyingToMessage?.id,
         }).unwrap();
 
         for (let i = 1; i < attachedMediaList.length; i++) {
@@ -599,6 +622,7 @@ export function ChatModule() {
           setMessageText('');
           setAttachedMediaList([]);
           setUploadingFileName(null);
+          setReplyingToMessage(null);
           if (!productCodeParam) setProductCodeInput('');
           refetchConversations();
           refetchMessages();
@@ -611,10 +635,12 @@ export function ChatModule() {
           conversationId: activeConversationId!,
           text: messageText.trim() || undefined,
           productCode: productCodeInput.trim() || undefined,
+          replyToId: replyingToMessage?.id,
         }).unwrap();
 
         if (res.success) {
           setMessageText('');
+          setReplyingToMessage(null);
           if (!productCodeParam) setProductCodeInput('');
           refetchConversations();
           refetchMessages();
@@ -625,6 +651,37 @@ export function ChatModule() {
       }
     } catch (err: any) {
       addToast(`❌ ${err?.data?.error || err?.message || 'Failed to send message'}`, 'error');
+    }
+  };
+
+  const handleForwardSubmit = async () => {
+    if (!forwardingMessage || selectedForwardTargets.length === 0) return;
+    const isManyTimes = (forwardingMessage.forwardCount || 0) >= 5 || forwardingMessage.isForwardedManyTimes;
+    if (isManyTimes && selectedForwardTargets.length > 1) {
+      addToast('⚠️ Messages forwarded 5 or more times can only be forwarded to 1 chat at a time.', 'warning');
+      return;
+    }
+    if (!isManyTimes && selectedForwardTargets.length > 5) {
+      addToast('⚠️ You can only select up to 5 target chats at a time.', 'warning');
+      return;
+    }
+
+    try {
+      const res = await forwardMessageMutation({
+        messageId: forwardingMessage.id,
+        targetConversationIds: selectedForwardTargets,
+      }).unwrap();
+
+      if (res.success) {
+        addToast(`↪️ Message forwarded to ${selectedForwardTargets.length} chat(s)!`, 'success');
+        setIsForwardModalOpen(false);
+        setForwardingMessage(null);
+        setSelectedForwardTargets([]);
+        refetchConversations();
+        if (activeConversationId) refetchMessages();
+      }
+    } catch (err: any) {
+      addToast(`❌ ${err?.data?.error || err?.message || 'Failed to forward message'}`, 'error');
     }
   };
 
@@ -1262,8 +1319,8 @@ export function ChatModule() {
                 </div>
               )}
 
-              {/* Messages Container */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]">
+              {/* Messages Container (Inverted flex-col-reverse for WhatsApp Web instant bottom alignment) */}
+              <div className="flex-1 p-4 overflow-y-auto flex flex-col-reverse space-y-3 space-y-reverse bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]">
                 {activeBroadcastId ? (
                   isBroadcastDetailsLoading ? (
                     <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">
@@ -1318,12 +1375,12 @@ export function ChatModule() {
                   <div className="flex items-center justify-center h-full text-xs text-slate-400 animate-pulse">
                     💬 Fetching chat history...
                   </div>
-                ) : displayMessages.length === 0 ? (
+                ) : reversedDisplayMessages.length === 0 ? (
                   <div className="text-center py-16 text-xs text-slate-500">
                     No messages in this chat yet. Send a greeting or request a product quote!
                   </div>
                 ) : (
-                  displayMessages.map((msg) => {
+                  reversedDisplayMessages.map((msg) => {
                     const isSelf = msg.senderId === currentUser?.id;
                     const isCallLog = msg.text?.startsWith('[CALL_LOG]:');
 
@@ -1373,6 +1430,10 @@ export function ChatModule() {
                       );
                     }
 
+                    const isForwarded = msg.isForwarded || (msg.forwardCount || 0) > 0 || msg.text?.startsWith('↪️ Forwarded');
+                    const isForwardedManyTimes = (msg.forwardCount || 0) >= 5 || msg.isForwardedManyTimes;
+                    const replyObj = msg.replyToMessage;
+
                     return (
                       <div
                         key={msg.id}
@@ -1385,15 +1446,59 @@ export function ChatModule() {
                               : 'bg-slate-900 text-slate-200 border border-slate-800 rounded-tl-none'
                           }`}
                         >
-                          {/* Own Message Edit Button Overlay */}
-                          {isSelf && msg.text && !msg.isDeleted && (
+                          {/* Hover Action Buttons: Edit, Reply, Forward */}
+                          <div className={`absolute -top-3 ${isSelf ? '-left-20' : '-right-20'} opacity-0 group-hover:opacity-100 transition flex items-center gap-1 bg-slate-900/90 border border-slate-700 p-1 rounded-xl shadow-lg z-10`}>
+                            {isSelf && msg.text && !msg.isDeleted && (
+                              <button
+                                onClick={() => handleStartEditMessage(msg)}
+                                className="p-1 text-slate-300 hover:text-emerald-400 text-[11px] font-bold"
+                                title="Edit Message"
+                              >
+                                ✏️
+                              </button>
+                            )}
                             <button
-                              onClick={() => handleStartEditMessage(msg)}
-                              className="absolute -top-2 -left-2 opacity-0 group-hover:opacity-100 transition p-1 bg-slate-900 border border-slate-700 text-slate-300 hover:text-emerald-400 rounded-full text-[10px] font-bold shadow"
-                              title="Edit Message"
+                              onClick={() => setReplyingToMessage({
+                                id: msg.id,
+                                text: msg.text,
+                                productCode: msg.productCode,
+                                senderName: isSelf ? 'You' : (currentParticipant?.fullName || 'User'),
+                              })}
+                              className="p-1 text-slate-300 hover:text-emerald-400 text-[11px] font-bold"
+                              title="Reply to message"
                             >
-                              ✏️
+                              ↩️
                             </button>
+                            <button
+                              onClick={() => {
+                                setForwardingMessage(msg);
+                                setSelectedForwardTargets([]);
+                                setIsForwardModalOpen(true);
+                              }}
+                              className="p-1 text-slate-300 hover:text-indigo-400 text-[11px] font-bold"
+                              title="Forward message"
+                            >
+                              ↪️
+                            </button>
+                          </div>
+
+                          {/* Forwarded Header Badge */}
+                          {isForwardedManyTimes ? (
+                            <div className="flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded mb-1.5 border border-amber-500/30">
+                              <span>⏩</span> Forwarded Many Times
+                            </div>
+                          ) : isForwarded ? (
+                            <div className="flex items-center gap-1 text-[10px] font-bold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded mb-1.5 border border-slate-700">
+                              <span>↪️</span> Forwarded
+                            </div>
+                          ) : null}
+
+                          {/* Quoted Reply Box inside Message Bubble */}
+                          {replyObj && (
+                            <div className="mb-2 p-2 bg-slate-950/70 rounded-xl border-l-4 border-emerald-500 text-[11px] space-y-0.5">
+                              <div className="font-bold text-emerald-400 text-[10px]">↩️ {replyObj.senderName || 'Quoted Message'}</div>
+                              <div className="text-slate-300 font-mono line-clamp-2">{replyObj.text || replyObj.productCode || 'Attachment'}</div>
+                            </div>
                           )}
 
                           {/* Standard Message Text */}
@@ -1448,7 +1553,21 @@ export function ChatModule() {
                                 minute: '2-digit',
                               })}
                             </span>
-                            {isSelf && <span>✓✓</span>}
+                            {isSelf && (
+                              <span className="ml-1 font-bold">
+                                {msg.status === 'PENDING' ? (
+                                  <span title="Pending" className="opacity-60">🕒</span>
+                                ) : msg.status === 'SENT' ? (
+                                  <span title="Sent" className="opacity-70 font-semibold">✓</span>
+                                ) : msg.status === 'DELIVERED' ? (
+                                  <span title="Delivered" className="opacity-90 font-bold">✓✓</span>
+                                ) : msg.status === 'READ' ? (
+                                  <span title="Read (Seen)" className="text-sky-300 font-extrabold drop-shadow">✓✓</span>
+                                ) : (
+                                  <span>✓✓</span>
+                                )}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1485,6 +1604,23 @@ export function ChatModule() {
               ) : (
                 /* Message Input Composer */
                 <form onSubmit={handleSendMessageSubmit} className="p-3 bg-slate-900 border-t border-slate-800 flex flex-col gap-2 flex-shrink-0 z-10">
+                  {/* Quoted Replying Message Pill */}
+                  {replyingToMessage && (
+                    <div className="flex items-center justify-between bg-emerald-950/80 px-3 py-1.5 rounded-xl border border-emerald-500/40 text-xs">
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="text-emerald-400 font-bold">↩️ Replying to {replyingToMessage.senderName || 'Message'}:</span>
+                        <span className="text-slate-300 font-mono truncate max-w-xs">{replyingToMessage.text || replyingToMessage.productCode || 'Attachment'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setReplyingToMessage(null)}
+                        className="text-slate-400 hover:text-white text-xs font-bold ml-2"
+                      >
+                        ✕ Cancel
+                      </button>
+                    </div>
+                  )}
+
                   {/* Editing Message Pill */}
                   {editingMessage && (
                     <div className="flex items-center justify-between bg-amber-500/20 px-3 py-1.5 rounded-xl border border-amber-500/40 text-xs">
@@ -1703,6 +1839,86 @@ export function ChatModule() {
         onConfirmSend={handleConfirmBroadcastSend}
         isSending={isSendingBroadcast}
       />
+
+      {/* Forwarding Modal */}
+      {isForwardModalOpen && forwardingMessage && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <span>↪️ Forward Message</span>
+              </h3>
+              <button onClick={() => setIsForwardModalOpen(false)} className="text-slate-400 hover:text-white font-bold text-sm">✕</button>
+            </div>
+
+            {(forwardingMessage.forwardCount || 0) >= 5 || forwardingMessage.isForwardedManyTimes ? (
+              <div className="bg-amber-500/20 border border-amber-500/40 p-3 rounded-2xl text-xs text-amber-300 font-semibold flex items-center gap-2">
+                <span>⏩</span> Message has been forwarded 5 or more times. You can only forward to 1 chat at a time.
+              </div>
+            ) : (
+              <div className="text-xs text-slate-400">
+                Select up to 5 chats to forward this message to.
+              </div>
+            )}
+
+            {/* List Conversations with checkmarks */}
+            <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+              {conversations.map((c) => {
+                const isSelected = selectedForwardTargets.includes(c.conversationId);
+                const isManyTimes = (forwardingMessage.forwardCount || 0) >= 5 || forwardingMessage.isForwardedManyTimes;
+
+                return (
+                  <div
+                    key={c.conversationId}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedForwardTargets((prev) => prev.filter((id) => id !== c.conversationId));
+                      } else {
+                        if (isManyTimes) {
+                          setSelectedForwardTargets([c.conversationId]);
+                        } else {
+                          if (selectedForwardTargets.length >= 5) {
+                            addToast('⚠️ Standard forwarding is limited to 5 chats max.', 'warning');
+                            return;
+                          }
+                          setSelectedForwardTargets((prev) => [...prev, c.conversationId]);
+                        }
+                      }
+                    }}
+                    className={`p-3 rounded-2xl border flex items-center justify-between cursor-pointer transition ${
+                      isSelected ? 'bg-emerald-950/60 border-emerald-500/60' : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-600/20 text-indigo-300 font-bold flex items-center justify-center text-xs">
+                        {c.participant.fullName.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white text-xs">{c.participant.fullName}</h4>
+                        <p className="text-[10px] text-slate-400">{c.participant.shopName}</p>
+                      </div>
+                    </div>
+                    <div className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-bold border ${isSelected ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'border-slate-700'}`}>
+                      {isSelected && '✓'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setIsForwardModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700">Cancel</button>
+              <button
+                onClick={handleForwardSubmit}
+                disabled={selectedForwardTargets.length === 0 || isForwardingMsg}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold text-xs shadow-md flex items-center gap-1.5"
+              >
+                {isForwardingMsg ? 'Forwarding...' : `Forward (${selectedForwardTargets.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </WhatsAppLayout>
   );
 }

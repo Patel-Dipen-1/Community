@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../../types/navigation.types';
-import { Input } from '../../components/common/Input';
-import { Button } from '../../components/common/Button';
+import { Input, Button, PageTitle, MutedText } from '../../components/common';
+import { colors, spacing } from '../../theme/theme';
 import { useLoginMutation } from '../../services/api/authApi';
 import { authService } from '../../services/auth/authService';
 import { useAppDispatch } from '../../hooks/useRedux';
@@ -43,8 +43,8 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.header}>
-        <Text style={styles.title}>Welcome Back 👋</Text>
-        <Text style={styles.subtitle}>Sign in to your B2B Business Account</Text>
+        <PageTitle style={styles.title}>Welcome Back 👋</PageTitle>
+        <MutedText style={styles.subtitle}>Sign in to your B2B Business Account</MutedText>
       </View>
 
       <View style={styles.form}>
@@ -86,30 +86,27 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    backgroundColor: '#020617',
-    padding: 24,
+    backgroundColor: colors.background,
+    padding: spacing.xxl,
     justifyContent: 'center',
   },
   header: {
-    marginBottom: 32,
+    marginBottom: spacing.section,
   },
   title: {
-    color: '#ffffff',
-    fontSize: 26,
-    fontWeight: '900',
-    marginBottom: 6,
+    marginBottom: spacing.xs,
   },
   subtitle: {
-    color: '#94a3b8',
     fontSize: 14,
   },
   form: {
     width: '100%',
   },
   submitBtn: {
-    marginTop: 8,
+    marginTop: spacing.sm,
   },
   registerBtn: {
-    marginTop: 12,
+    marginTop: spacing.md,
   },
 });
+
