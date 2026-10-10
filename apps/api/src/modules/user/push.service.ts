@@ -117,6 +117,39 @@ export class PushNotificationService {
 
     const tokenStrings = tokens.map((t) => t.token);
 
+    // Expo Push Service dispatch for ExponentPushToken & ExpoPushToken
+    const expoTokens = tokenStrings.filter((t) => t.includes('ExponentPushToken') || t.includes('ExpoPushToken'));
+    let expoSentCount = 0;
+    if (expoTokens.length > 0) {
+      try {
+        const expoMessages = expoTokens.map((to) => ({
+          to,
+          sound: 'default',
+          title: notification.title,
+          body: notification.body,
+          data: notification.data || {},
+          badge: 1,
+          channelId: 'default',
+          priority: 'high',
+        }));
+
+        const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(expoMessages),
+        });
+        if (expoRes.ok) {
+          expoSentCount = expoTokens.length;
+        }
+      } catch (err) {
+        console.error('Expo Push notification error:', err);
+      }
+    }
+
     // Primary: Send via Firebase Admin SDK
     if (getApps().length > 0) {
       try {
@@ -129,7 +162,7 @@ export class PushNotificationService {
           data: notification.data || {},
         });
 
-        return { sent: response.successCount, totalTokens: tokens.length, failures: response.failureCount };
+        return { sent: response.successCount + expoSentCount, totalTokens: tokens.length, failures: response.failureCount };
       } catch (err: any) {
         console.error('FCM Multicast delivery error:', err);
       }
@@ -162,9 +195,9 @@ export class PushNotificationService {
           // Ignore individual token failure
         }
       }
-      return { sent: successCount, totalTokens: tokens.length };
+      return { sent: successCount + expoSentCount, totalTokens: tokens.length };
     }
 
-    return { sent: 0, reason: 'FCM_CREDENTIALS_NOT_FOUND' };
+    return { sent: expoSentCount, totalTokens: tokens.length };
   }
 }

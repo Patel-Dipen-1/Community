@@ -77,4 +77,24 @@ export class PushNotificationService {
   static addNotificationTapListener(onTap: (notification: Notifications.NotificationResponse) => void) {
     return Notifications.addNotificationResponseReceivedListener(onTap);
   }
+
+  /**
+   * Display Local Notification immediately on device (System Popup & Banner)
+   */
+  static async displayLocalNotification(title: string, body: string, data?: Record<string, any>) {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data: data || {},
+          sound: 'default',
+          badge: 1,
+        },
+        trigger: null,
+      });
+    } catch (err) {
+      console.warn('Failed to present local notification:', err);
+    }
+  }
 }

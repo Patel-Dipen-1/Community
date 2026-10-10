@@ -27,6 +27,7 @@ export const baseApi = createApi({
     'Subscriptions',
     'Communities',
     'Calls',
+    'Broadcasts',
   ],
   endpoints: () => ({}),
 });

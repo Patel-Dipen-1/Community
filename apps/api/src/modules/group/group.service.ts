@@ -32,6 +32,23 @@ export class GroupService {
     const requestedCapacity = Number(data.maxCapacity) || superAdminGlobalMaxCapacity;
     const effectiveCapacity = Math.min(Math.max(requestedCapacity, 2), 500);
 
+    const rawMemberIds: string[] = Array.isArray(data.memberUserIds)
+      ? data.memberUserIds
+      : Array.isArray(data.selectedUserIds)
+      ? data.selectedUserIds
+      : Array.isArray(data.recipientIds)
+      ? data.recipientIds
+      : [];
+
+    const uniqueMemberIds = Array.from(
+      new Set(rawMemberIds.filter((id) => typeof id === 'string' && id && id !== createdById))
+    );
+
+    const membersToCreate = [
+      { userId: createdById, roleInGroup: 'ADMIN' as const },
+      ...uniqueMemberIds.map((uId) => ({ userId: uId, roleInGroup: 'MEMBER' as const })),
+    ];
+
     // Create Group in PostgreSQL
     const group = await prisma.group.create({
       data: {
@@ -45,10 +62,7 @@ export class GroupService {
         hideMemberIdentity: data.hideMemberIdentity !== undefined ? Boolean(data.hideMemberIdentity) : true,
         membersCanSeeMemberList: data.membersCanSeeMemberList !== undefined ? Boolean(data.membersCanSeeMemberList) : false,
         members: {
-          create: {
-            userId: createdById,
-            roleInGroup: 'ADMIN',
-          },
+          create: membersToCreate,
         },
       },
       include: {
@@ -72,15 +86,20 @@ export class GroupService {
       }
     }
 
+    const whereCondition: any = {
+      isDeleted: false,
+    };
+
+    if (!isSuperAdmin && userId) {
+      whereCondition.OR = [
+        { createdById: userId },
+        { members: { some: { userId } } },
+        { communitySlug: { in: allowedCommunities.map((c) => c.toLowerCase()) } },
+      ];
+    }
+
     const groups = await prisma.group.findMany({
-      where: {
-        isDeleted: false,
-        ...(!isSuperAdmin && userId
-          ? {
-              communitySlug: { in: allowedCommunities.map(c => c.toLowerCase()) },
-            }
-          : {}),
-      },
+      where: whereCondition,
       include: {
         members: true,
       },

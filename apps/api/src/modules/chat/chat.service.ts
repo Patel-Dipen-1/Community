@@ -624,6 +624,26 @@ export class ChatService {
         data: { updatedAt: new Date() },
       });
 
+      // 6. Trigger Background Push Notification to Recipient
+      try {
+        const { PushNotificationService } = await import('../user/push.service');
+        const senderDisplayName = sender.business?.shopName || sender.fullName || 'Business Contact';
+        const msgSnippet = message.text || (message.productCode ? `📦 Shared Product [${message.productCode}]` : '📷 Media Attachment');
+
+        PushNotificationService.sendPushToUser(recipient.id, {
+          title: `💬 ${senderDisplayName}`,
+          body: msgSnippet,
+          data: {
+            conversationId,
+            senderId,
+            senderName: senderDisplayName,
+            type: 'CHAT_MESSAGE',
+          },
+        }).catch((e) => console.warn('Push notification dispatch error:', e));
+      } catch (pushErr) {
+        console.warn('Failed to import or dispatch push notification:', pushErr);
+      }
+
       return {
         ...message,
         status: message.status || 'SENT',

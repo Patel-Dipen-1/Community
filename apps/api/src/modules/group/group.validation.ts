@@ -4,10 +4,14 @@ export const CreateGroupSchema = z.object({
   title: z.string().min(3, "Group title is required"),
   description: z.string().optional(),
   type: z.enum(['GROUP', 'BROADCAST']).default('GROUP'),
+  communitySlug: z.string().optional(),
   maxCapacity: z.number().int().positive().default(40), // Configurable member limit (capped by Super Admin limit e.g. 40)
   onlyAdminCanPost: z.boolean().default(false),         // Only Admin Can Post toggle
   hideMemberIdentity: z.boolean().default(true),        // Hide Member Identity (ON/OFF)
   membersCanSeeMemberList: z.boolean().default(false),  // Members Can See Member List (ON/OFF)
+  memberUserIds: z.array(z.string()).optional(),
+  selectedUserIds: z.array(z.string()).optional(),
+  recipientIds: z.array(z.string()).optional(),
 });
 
 export const UpdateGroupSettingsSchema = z.object({
