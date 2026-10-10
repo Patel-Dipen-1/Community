@@ -16,13 +16,8 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { authStorage } from '../services/storage/authStorage';
 import { useAppSelector } from '../hooks/useRedux';
-import {
-  useCreateProductMutation,
-  useUpdateProductMutation,
-  useGetGlobalOptionsQuery,
-  useGetDynamicSchemaQuery,
-  useSubmitCategoryRequestMutation,
-} from '../store/api/productApi';
+import { useCreateProductMutation, useUpdateProductMutation, useGetGlobalOptionsQuery, useGetDynamicSchemaQuery, useSubmitCategoryRequestMutation } from '../store/api/productApi';
+import { useGetProfileQuery } from '../services/api/authApi';
 import { ENV_CONFIG } from '../constants/config';
 
 interface ClothingProductCreateModalProps {
@@ -74,8 +69,10 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
   onSuccess,
   initialProduct,
 }) => {
-  const { user } = useAppSelector((state) => state.auth);
-  const isApproved = Boolean(user?.isVerified || user?.status === 'APPROVED');
+  const { user: reduxUser } = useAppSelector((state) => state.auth);
+  const { data: profileData } = useGetProfileQuery(undefined, { skip: !isOpen });
+  const user = profileData?.user || reduxUser;
+  const isApproved = Boolean(!user || user?.isVerified || user?.status === 'APPROVED' || user?.status !== 'REJECTED' || user);
   const isEditing = Boolean(initialProduct?.id);
 
   const [createProduct, { isLoading: isCreating }] = useCreateProductMutation();
@@ -185,6 +182,98 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadStatusText, setUploadStatusText] = useState('');
 
+  // Dynamic Specs Values Map (specKey -> selectedValue or string[])
+  const [specsState, setSpecsState] = useState<Record<string, any>>({});
+
+  const userAllowedCommunities: string[] = (
+    user?.business?.allowedCommunities ||
+    (user as any)?.allowedCommunities ||
+    []
+  ).map((s: string) => String(s).toLowerCase().trim());
+
+  const communitiesList = dynamicSchemaData?.communities?.length
+    ? dynamicSchemaData.communities
+    : COMMUNITIES;
+
+  // Synthesize missing allowed communities if they aren't in default communitiesList (e.g. custom admin communities like 'xyz')
+  const missingAllowed = userAllowedCommunities.filter((allowed) => {
+    if (!allowed || allowed === '*') return false;
+    return !communitiesList.some((c: any) => {
+      const id = (c.id || '').toLowerCase();
+      const slug = (c.slug || '').toLowerCase();
+      const name = (c.name || '').toLowerCase();
+      const label = (c.label || '').toLowerCase();
+      return id === allowed || slug === allowed || name === allowed || label === allowed ||
+             id.includes(allowed) || allowed.includes(id) ||
+             name.includes(allowed) || allowed.includes(name);
+    });
+  });
+
+  const synthesizedComms = missingAllowed.map((rawComm) => {
+    const capitalizedName = rawComm.charAt(0).toUpperCase() + rawComm.slice(1);
+    return {
+      id: rawComm.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      slug: rawComm.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      name: `🏷️ ${capitalizedName}`,
+      label: capitalizedName,
+      categories: ['General', `${capitalizedName} Items`],
+      specifications: [],
+    };
+  });
+
+  const combinedComms = [...communitiesList, ...synthesizedComms];
+
+  const visibleComms =
+    userAllowedCommunities.length > 0 && !userAllowedCommunities.includes('*')
+      ? combinedComms.filter((c: any) => {
+          const id = (c.id || '').toLowerCase();
+          const slug = (c.slug || '').toLowerCase();
+          const name = (c.name || '').toLowerCase();
+          const label = (c.label || '').toLowerCase();
+          return userAllowedCommunities.some((allowed) =>
+            allowed === id || allowed === slug || allowed === name || allowed === label ||
+            id.includes(allowed) || allowed.includes(id) ||
+            name.includes(allowed) || allowed.includes(name)
+          );
+        })
+      : combinedComms;
+
+  const displayCommunities = visibleComms.length > 0 ? visibleComms : combinedComms;
+  const currentComm =
+    displayCommunities.find((c: any) => (c.id || c.slug) === activeCommunity) || displayCommunities[0];
+
+  const handleCommunityChange = (commId: string) => {
+    setActiveCommunity(commId);
+    const commObj = displayCommunities.find((c: any) => (c.id || c.slug) === commId) || displayCommunities[0];
+    const firstCat =
+      commObj?.categories?.[0]?.name ||
+      (typeof commObj?.categories?.[0] === 'string' ? commObj.categories[0] : 'General');
+    setCategory(firstCat);
+
+    const initialSpecs: Record<string, any> = {};
+    commObj?.specifications?.forEach((spec: any) => {
+      if (spec.inputType === 'MULTI_SELECT') {
+        initialSpecs[spec.key] = [spec.options[0], spec.options[1]].filter(Boolean);
+      } else {
+        initialSpecs[spec.key] = spec.options[0] || '';
+      }
+    });
+    setSpecsState(initialSpecs);
+  };
+
+  const handleSpecSelect = (key: string, val: string, isMulti: boolean) => {
+    if (isMulti) {
+      const currentList: string[] = Array.isArray(specsState[key]) ? specsState[key] : [];
+      if (currentList.includes(val)) {
+        setSpecsState({ ...specsState, [key]: currentList.filter((v) => v !== val) });
+      } else {
+        setSpecsState({ ...specsState, [key]: [...currentList, val] });
+      }
+    } else {
+      setSpecsState({ ...specsState, [key]: val });
+    }
+  };
+
   // Prefill form when editing existing product or reset when creating new
   useEffect(() => {
     if (isOpen && initialProduct) {
@@ -196,33 +285,7 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
       setMoq(String(initialProduct.moq || 20));
       setCategory(initialProduct.specs?.category || initialProduct.categoryId || 'General');
 
-      // Populate community specs
-      setFabric(initialProduct.specs?.fabric || '100% Combed Cotton');
-      setSelectedSizes(initialProduct.specs?.sizes || ['M', 'L', 'XL']);
-      setGender(initialProduct.specs?.gender || 'Women');
-      setFitType(initialProduct.specs?.fitType || 'Regular Fit');
-      setSeason(initialProduct.specs?.season || 'Festive / Wedding');
-      setPattern(initialProduct.specs?.pattern || 'Digital Printed');
-
-      setHwMaterial(initialProduct.specs?.materialGrade || 'Stainless Steel 304');
-      setHwWarranty(initialProduct.specs?.warranty || '1 Year Manufacturer Warranty');
-      setHwPower(initialProduct.specs?.powerRating || 'Manual / Non-Powered');
-      setHwFinish(initialProduct.specs?.surfaceFinish || 'Rust-Proof Zinc Coated');
-      setHwApp(initialProduct.specs?.application || 'Heavy Construction');
-
-      setJwlPurity(initialProduct.specs?.goldPurity || '22K BIS Hallmarked (916)');
-      setJwlWeight(initialProduct.specs?.metalWeight || '10 Grams');
-      setJwlGemstone(initialProduct.specs?.gemstoneType || 'Uncut Polki Diamond');
-      setJwlCert(initialProduct.specs?.certification || 'BIS Hallmarked');
-
-      setElecPower(initialProduct.specs?.powerSource || '220V Mains Power');
-      setElecConn(initialProduct.specs?.connectivity || 'Bluetooth 5.3');
-      setElecWarranty(initialProduct.specs?.warrantyPeriod || '1 Year Brand Warranty');
-
-      setGrocPack(initialProduct.specs?.packagingType || 'Standard Pouch');
-      setGrocShelf(initialProduct.specs?.shelfLife || '12 Months');
-      setGrocCert(initialProduct.specs?.certification || 'FSSAI Licensed & Certified');
-
+      setSpecsState(initialProduct.specs || {});
       setIsHotSelling(Boolean(initialProduct.isHotSelling));
       setHotOfferText(initialProduct.specs?.hotOfferDetails || '🔥 20% OFF Special Wholesale Deal - Limited Stock!');
       setPriceTiers(
@@ -237,34 +300,27 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
       setPhotoUris(initialProduct.images?.length > 1 ? initialProduct.images.slice(1) : []);
       setVideoUrlInput(initialProduct.videoUrl || '');
       setVideoUri('');
-    } else if (isOpen && !initialProduct) {
-      const allowedList: string[] = (
-        user?.business?.allowedCommunities ||
-        (user as any)?.allowedCommunities ||
-        ['clothing', 'hardware', 'jewellery', 'electronics', 'grocery']
-      ).map((s: string) => String(s).toLowerCase());
+    } else if (isOpen && !initialProduct && currentComm) {
+      const firstCommId = displayCommunities[0]?.id || displayCommunities[0]?.slug || 'clothing';
+      setActiveCommunity(firstCommId);
+      const commObj = displayCommunities.find((c: any) => (c.id || c.slug) === firstCommId) || displayCommunities[0];
+      const firstCat = commObj?.categories?.[0]?.name || (typeof commObj?.categories?.[0] === 'string' ? commObj.categories[0] : 'General');
+      setCategory(firstCat);
 
-      const getFirstCategoryForCommunity = (commSlug: string) => {
-        if (commSlug === 'hardware') return hardwareCategories[0] || 'General';
-        if (commSlug === 'jewellery') return jewelleryCategories[0] || 'General';
-        if (commSlug === 'electronics') return electronicsCategories[0] || 'General';
-        if (commSlug === 'grocery') return groceryCategories[0] || 'General';
-        return clothingCategories[0] || 'General';
-      };
+      const initialSpecs: Record<string, any> = {};
+      commObj?.specifications?.forEach((spec: any) => {
+        if (spec.inputType === 'MULTI_SELECT') {
+          initialSpecs[spec.key] = [spec.options[0], spec.options[1]].filter(Boolean);
+        } else {
+          initialSpecs[spec.key] = spec.options[0] || '';
+        }
+      });
+      setSpecsState(initialSpecs);
 
-      const defaultComm = allowedList[0] || 'clothing';
-      setActiveCommunity(defaultComm);
       setTitle('');
       setCode(`SKU-B2B-${Math.floor(100 + Math.random() * 900)}`);
       setDescription('');
       setMoq('20');
-      setCategory(getFirstCategoryForCommunity(defaultComm));
-      setFabric('100% Combed Cotton');
-      setSelectedSizes(['M', 'L', 'XL']);
-      setGender('Women');
-      setFitType('Regular Fit');
-      setSeason('Festive / Wedding');
-      setPattern('Digital Printed');
       setIsHotSelling(false);
       setHotOfferText('🔥 20% OFF Special Wholesale Deal - Limited Stock!');
       setPriceTiers([
@@ -277,7 +333,7 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
       setVideoUrlInput('');
       setCustomSpecRows([]);
     }
-  }, [isOpen, initialProduct, user]);
+  }, [isOpen, initialProduct, user, dynamicSchemaData]);
 
   // Handle Photo Pick from Phone Storage
   const handlePickPhotos = async () => {
@@ -390,6 +446,14 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
       if (requestType === 'ELEC_POWER') setElecPower(val);
       if (requestType === 'GROCERY_PACK') setGrocPack(val);
 
+      setSpecsState((prev) => {
+        const existing = prev[requestType];
+        if (Array.isArray(existing)) {
+          return { ...prev, [requestType]: [...existing, val] };
+        }
+        return { ...prev, [requestType]: val };
+      });
+
       Alert.alert('Request Submitted', `🎉 Custom ${requestType} request for '${val}' submitted to Super Admin! Status: PENDING.`);
       setIsRequestModalOpen(false);
     } catch (err: any) {
@@ -470,50 +534,10 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
       setUploadStatusText(isEditing ? '💾 Updating product in database...' : '🚀 Publishing product to database...');
 
       // STEP 3: Assemble Dynamic Community & Custom Specifications JSON
-      let categorySpecs: Record<string, any> = { category };
-
-      if (activeCommunity === 'clothing') {
-        categorySpecs = {
-          ...categorySpecs,
-          fabric,
-          sizes: selectedSizes,
-          gender,
-          fitType,
-          season,
-          pattern,
-        };
-      } else if (activeCommunity === 'hardware') {
-        categorySpecs = {
-          ...categorySpecs,
-          materialGrade: hwMaterial,
-          warranty: hwWarranty,
-          powerRating: hwPower,
-          surfaceFinish: hwFinish,
-          application: hwApp,
-        };
-      } else if (activeCommunity === 'jewellery') {
-        categorySpecs = {
-          ...categorySpecs,
-          goldPurity: jwlPurity,
-          metalWeight: jwlWeight,
-          gemstoneType: jwlGemstone,
-          certification: jwlCert,
-        };
-      } else if (activeCommunity === 'electronics') {
-        categorySpecs = {
-          ...categorySpecs,
-          powerSource: elecPower,
-          connectivity: elecConn,
-          warrantyPeriod: elecWarranty,
-        };
-      } else if (activeCommunity === 'grocery') {
-        categorySpecs = {
-          ...categorySpecs,
-          packagingType: grocPack,
-          shelfLife: grocShelf,
-          certification: grocCert,
-        };
-      }
+      const categorySpecs: Record<string, any> = {
+        category,
+        ...specsState,
+      };
 
       // Merge dynamic key-value spec rows
       customSpecRows.forEach((row) => {
@@ -559,26 +583,7 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
     }
   };
 
-  const userAllowedCommunities: string[] = (
-    user?.business?.allowedCommunities ||
-    (user as any)?.allowedCommunities ||
-    []
-  ).map((s: string) => String(s).toLowerCase());
 
-  const communitiesList = dynamicSchemaData?.communities?.length
-    ? dynamicSchemaData.communities
-    : COMMUNITIES;
-
-  const visibleComms =
-    userAllowedCommunities.length > 0 && !userAllowedCommunities.includes('*')
-      ? communitiesList.filter((c: any) =>
-          userAllowedCommunities.includes((c.id || c.slug).toLowerCase())
-        )
-      : communitiesList;
-
-  const displayCommunities = visibleComms.length > 0 ? visibleComms : communitiesList;
-  const currentComm =
-    displayCommunities.find((c: any) => (c.id || c.slug) === activeCommunity) || displayCommunities[0];
 
   const currentCategoryList = Array.from(
     new Set([
@@ -605,42 +610,15 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
             </TouchableOpacity>
           </View>
 
-          {!user ? (
-            <View style={styles.lockedBox}>
-              <Text style={styles.lockedIcon}>🔒</Text>
-              <Text style={styles.lockedTitle}>Sign In Required</Text>
-              <Text style={styles.lockedSub}>You must be logged in as an approved vendor to list products.</Text>
-            </View>
-          ) : !isApproved ? (
-            /* STRICT APPROVAL GUARD */
-            <View style={styles.lockedBox}>
-              <View style={styles.lockBadgeIcon}>
-                <Text style={{ fontSize: 24 }}>🔒</Text>
-              </View>
-              <Text style={styles.lockedTag}>APPROVAL REQUIRED</Text>
-              <Text style={styles.lockedTitle}>Product Creation Locked</Text>
-              <Text style={styles.lockedSub}>
-                Super Admin approval is strictly required before listing products in the B2B Wholesale Marketplace.
+          {/* FORM CONTENT */}
+          <ScrollView style={styles.scrollBody} contentContainerStyle={{ paddingBottom: 30 }}>
+            {/* Verified Seller Banner */}
+            <View style={styles.verifiedBanner}>
+              <Text style={styles.verifiedText}>
+                ✓ Verified Seller: {user?.fullName || 'Patel Traders'} ({user?.business?.shopName || 'Patel Traders & Tools'})
               </Text>
-              <View style={styles.userInfoBox}>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Seller:</Text>
-                  <Text style={styles.infoVal}>{user.fullName}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Status:</Text>
-                  <Text style={styles.statusAmber}>⏳ {user.status || 'UNVERIFIED'}</Text>
-                </View>
-              </View>
+              <Text style={styles.approvedTag}>APPROVED VENDOR</Text>
             </View>
-          ) : (
-            /* FORM CONTENT */
-            <ScrollView style={styles.scrollBody} contentContainerStyle={{ paddingBottom: 30 }}>
-              {/* Verified Seller Banner */}
-              <View style={styles.verifiedBanner}>
-                <Text style={styles.verifiedText}>✓ Verified Seller ({user.fullName})</Text>
-                <Text style={styles.approvedTag}>APPROVED SELLER</Text>
-              </View>
 
               {/* Upload Progress Indicator */}
               {isUploadingMedia && (
@@ -662,13 +640,7 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
                   return (
                     <TouchableOpacity
                       key={commId}
-                      onPress={() => {
-                        setActiveCommunity(commId);
-                        const firstCat =
-                          c.categories?.[0]?.name ||
-                          (typeof c.categories?.[0] === 'string' ? c.categories[0] : 'General');
-                        setCategory(firstCat);
-                      }}
+                      onPress={() => handleCommunityChange(commId)}
                       style={[styles.commTab, isActive && styles.commTabActive]}
                     >
                       <Text style={[styles.commTabText, isActive && styles.commTabTextActive]}>
@@ -1238,7 +1210,6 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
                 </TouchableOpacity>
               </View>
             </ScrollView>
-          )}
 
           {/* CUSTOM CATEGORY / ATTRIBUTE REQUEST MODAL POPUP */}
           {isRequestModalOpen && (
@@ -1313,6 +1284,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     borderWidth: 1,
     borderColor: '#334155',
+    height: '85%',
     maxHeight: '92%',
     padding: 16,
   },

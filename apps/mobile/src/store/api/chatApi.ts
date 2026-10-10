@@ -171,8 +171,27 @@ export const chatApi = baseApi.injectEndpoints({
         method: 'POST',
       }),
     }),
+
+    searchUsers: builder.query<{ success: boolean; users: SearchedUserItem[] }, string>({
+      query: (query) => ({
+        url: '/chat/users/search',
+        params: { query },
+      }),
+    }),
   }),
 });
+
+export interface SearchedUserItem {
+  userId: string;
+  fullName: string;
+  mobileNumber: string;
+  shopName?: string;
+  assignedRole?: string;
+  status?: string;
+  isVerified?: boolean;
+  avatar?: string;
+  city?: string;
+}
 
 export const {
   useGetConversationsQuery,
@@ -182,4 +201,6 @@ export const {
   useToggleReactionMutation,
   useStarMessageMutation,
   useMarkConversationAsReadMutation,
+  useSearchUsersQuery,
+  useLazySearchUsersQuery,
 } = chatApi;

@@ -101,16 +101,46 @@ export function ClothingProductCreateModal({ isOpen, onClose, onSuccess }: Cloth
     user?.business?.allowedCommunities ||
     (user as any)?.allowedCommunities ||
     []
-  ).map((s: string) => String(s).toLowerCase());
+  ).map((s: string) => String(s).toLowerCase().trim());
+
+  // Synthesize missing allowed communities if they aren't in default communitiesList (e.g. custom admin communities like 'xyz')
+  const missingAllowed = allowedCommunitiesList.filter((allowed) => {
+    if (!allowed || allowed === '*') return false;
+    return !communitiesList.some((c: any) => {
+      const id = (c.id || '').toLowerCase();
+      const slug = (c.slug || '').toLowerCase();
+      const name = (c.name || '').toLowerCase();
+      return id === allowed || slug === allowed || name === allowed || id.includes(allowed) || allowed.includes(id);
+    });
+  });
+
+  const synthesizedComms = missingAllowed.map((rawComm) => {
+    const capitalizedName = rawComm.charAt(0).toUpperCase() + rawComm.slice(1);
+    return {
+      id: rawComm.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      slug: rawComm.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      name: capitalizedName,
+      icon: '🏷️',
+      categories: [{ name: 'General' }, { name: `${capitalizedName} Items` }],
+      specifications: [],
+    };
+  });
+
+  const combinedComms = [...communitiesList, ...synthesizedComms];
 
   const visibleCommunities =
     allowedCommunitiesList.length > 0 && !allowedCommunitiesList.includes('*')
-      ? communitiesList.filter((c: any) =>
-          allowedCommunitiesList.includes(c.id.toLowerCase()) ||
-          allowedCommunitiesList.includes((c.slug || '').toLowerCase())
-        )
-      : communitiesList;
-  const displayCommunities = visibleCommunities.length > 0 ? visibleCommunities : communitiesList;
+      ? combinedComms.filter((c: any) => {
+          const id = (c.id || '').toLowerCase();
+          const slug = (c.slug || '').toLowerCase();
+          const name = (c.name || '').toLowerCase();
+          return allowedCommunitiesList.some((allowed) =>
+            allowed === id || allowed === slug || allowed === name ||
+            id.includes(allowed) || allowed.includes(id)
+          );
+        })
+      : combinedComms;
+  const displayCommunities = visibleCommunities.length > 0 ? visibleCommunities : combinedComms;
 
   // Active Selected Community & Category
   const [activeCommunityId, setActiveCommunityId] = useState<string>('clothing');

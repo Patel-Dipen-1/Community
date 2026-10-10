@@ -75,7 +75,7 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Timer counter for active call duration
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (callState === 'CONNECTED') {
       interval = setInterval(() => {
         setDurationSecs((prev) => prev + 1);

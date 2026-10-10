@@ -26,6 +26,7 @@ import { ClothingProductCreateModal } from '../../components/ClothingProductCrea
 import { ENV_CONFIG } from '../../constants/config';
 import { authStorage } from '../../services/storage/authStorage';
 import { useAppSelector } from '../../hooks/useRedux';
+import { useGetProfileQuery } from '../../services/api/authApi';
 
 type Props = NativeStackScreenProps<MainTabParamList & RootStackParamList, 'Store'>;
 
@@ -65,7 +66,9 @@ const uploadLocalImage = async (localUri: string): Promise<string> => {
 };
 
 export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { user } = useAppSelector((state) => state.auth);
+  const { user: reduxUser } = useAppSelector((state) => state.auth);
+  const { data: profileData } = useGetProfileQuery();
+  const user = profileData?.user || reduxUser;
   const targetBusinessId = route?.params?.businessId;
 
   // Dual mode query: My store vs Target Supplier Store
@@ -265,7 +268,7 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
   return (
     <View style={styles.container}>
       <Header
-        title={store?.name || 'My B2B Showroom'}
+        title={store?.name || biz?.shopName || user?.business?.shopName || 'Patel Traders & Tools'}
         subtitle="Web Parity B2B Catalog & Local Image Upload"
         rightElement={
           <TouchableOpacity style={styles.headerSharePill} onPress={handleShareStore}>
@@ -293,7 +296,9 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
               {store?.logoUrl ? (
                 <Image source={{ uri: store.logoUrl }} style={styles.storeLogoImage} />
               ) : (
-                <Text style={styles.storeLogoInitial}>{store?.name?.charAt(0).toUpperCase() || 'S'}</Text>
+                <Text style={styles.storeLogoInitial}>
+                  {(store?.name || biz?.shopName || user?.business?.shopName || user?.fullName || 'P').charAt(0).toUpperCase()}
+                </Text>
               )}
             </View>
 
@@ -301,21 +306,29 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
             <View style={styles.heroMetaBox}>
               <View style={styles.titleBadgeRow}>
                 <Text style={styles.heroStoreTitle} numberOfLines={1}>
-                  {store?.name || 'Royal Wholesale Store'}
+                  {store?.name || biz?.shopName || user?.business?.shopName || 'Patel Traders & Tools'}
                 </Text>
                 {biz?.verificationTag && <Text style={styles.verifiedTagPill}>✓ VERIFIED B2B</Text>}
               </View>
 
               <Text style={styles.heroSubText} numberOfLines={1}>
-                {biz?.shopName || 'Wholesale Business Catalog'} • 📍 {biz?.city || 'Surat'}, {biz?.state || 'Gujarat'}
+                {user?.fullName ? `${user.fullName} (${biz?.shopName || user?.business?.shopName || 'Patel Traders & Tools'})` : (biz?.shopName || user?.business?.shopName || 'Wholesale Business Catalog')} • 📍 {biz?.city || 'Surat'}, {biz?.state || 'Gujarat'}
               </Text>
 
               <View style={styles.communityPillRow}>
-                {biz?.allowedCommunities?.map((comm: string) => (
-                  <View key={comm} style={styles.commTagPill}>
-                    <Text style={styles.commTagText}>🏷️ {comm}</Text>
-                  </View>
-                ))}
+                {Array.isArray(biz?.allowedCommunities)
+                  ? biz.allowedCommunities.map((comm: string) => (
+                      <View key={comm} style={styles.commTagPill}>
+                        <Text style={styles.commTagText}>🏷️ {comm}</Text>
+                      </View>
+                    ))
+                  : typeof biz?.allowedCommunities === 'string'
+                  ? [biz.allowedCommunities].map((comm: string) => (
+                      <View key={comm} style={styles.commTagPill}>
+                        <Text style={styles.commTagText}>🏷️ {comm}</Text>
+                      </View>
+                    ))
+                  : null}
               </View>
             </View>
           </View>

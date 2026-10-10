@@ -5,7 +5,7 @@ export class ChatController {
   static async searchUsers(req: Request, res: Response) {
     try {
       const currentUserId = (req as any).user.userId || (req as any).user.id;
-      const query = (req.query.query || req.query.mobile || '') as string;
+      const query = (req.query.query || req.query.q || req.query.mobile || '') as string;
       const results = await ChatService.searchApprovedUsers(currentUserId, query);
       return res.status(200).json({ success: true, users: results });
     } catch (err: any) {

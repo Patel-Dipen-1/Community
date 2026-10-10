@@ -254,13 +254,37 @@ export class ChatService {
       orderBy: { updatedAt: 'desc' },
     });
 
-    return conversations
-      .filter((c) => {
-        if (c.user1.status === 'BLOCKED' || c.user2.status === 'BLOCKED') return false;
-        return checkCommunityAccess(c.user1, c.user2);
-      })
+    const validConversations = conversations.filter((c) => {
+      if (c.user1.status === 'BLOCKED' || c.user2.status === 'BLOCKED') return false;
+      return checkCommunityAccess(c.user1, c.user2);
+    });
+
+    const convIds = validConversations.map((c) => c.id);
+
+    // Calculate unread counts for messages sent by the other user that are not read
+    const unreadCounts = await prisma.message.groupBy({
+      by: ['conversationId'],
+      where: {
+        conversationId: { in: convIds },
+        senderId: { not: userId },
+        status: { not: 'READ' },
+      },
+      _count: { id: true },
+    });
+
+    const unreadMap: Record<string, number> = {};
+    for (const item of unreadCounts) {
+      unreadMap[item.conversationId] = item._count.id;
+    }
+
+    return validConversations
       .map((c) => {
         const otherUser = c.user1Id === userId ? c.user2 : c.user1;
+        const lastMsg = c.messages[0] || null;
+        const lastTime = lastMsg?.createdAt
+          ? new Date(lastMsg.createdAt).getTime()
+          : new Date(c.updatedAt || c.createdAt).getTime();
+
         return {
           conversationId: c.id,
           participant: {
@@ -273,10 +297,13 @@ export class ChatService {
             isVerified: otherUser.isVerified,
             allowedCommunities: otherUser.business?.allowedCommunities || ['clothing'],
           },
-          lastMessage: c.messages[0] || null,
+          lastMessage: lastMsg,
+          unreadCount: unreadMap[c.id] || 0,
           updatedAt: c.updatedAt,
+          sortTime: lastTime,
         };
-      });
+      })
+      .sort((a, b) => b.sortTime - a.sortTime);
   }
 
   /**

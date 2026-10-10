@@ -46,7 +46,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [forwardModalVisible, setForwardModalVisible] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState<any | null>(null);
   const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleScrollToQuotedMessage = (quoteContentSnippet: string) => {
     if (!quoteContentSnippet) return;

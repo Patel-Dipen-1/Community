@@ -25,7 +25,9 @@ export const authStorage = {
       }
       return await SecureStore.getItemAsync(ENV_CONFIG.TOKEN_KEY);
     } catch (error) {
-      console.error('Error reading JWT token:', error);
+      if (!isWeb) {
+        await SecureStore.deleteItemAsync(ENV_CONFIG.TOKEN_KEY).catch(() => {});
+      }
       return null;
     }
   },
@@ -38,7 +40,7 @@ export const authStorage = {
         await SecureStore.deleteItemAsync(ENV_CONFIG.TOKEN_KEY);
       }
     } catch (error) {
-      console.error('Error deleting JWT token:', error);
+      // Ignore deletion errors
     }
   },
 
@@ -60,7 +62,9 @@ export const authStorage = {
       const raw = isWeb ? localStorage.getItem(ENV_CONFIG.USER_KEY) : await SecureStore.getItemAsync(ENV_CONFIG.USER_KEY);
       return raw ? JSON.parse(raw) : null;
     } catch (error) {
-      console.error('Error reading User profile:', error);
+      if (!isWeb) {
+        await SecureStore.deleteItemAsync(ENV_CONFIG.USER_KEY).catch(() => {});
+      }
       return null;
     }
   },

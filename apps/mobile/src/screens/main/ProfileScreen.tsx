@@ -231,14 +231,16 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
           {/* Category & Location */}
           <View style={styles.metaBadgeRow}>
-            <Text style={styles.metaText}>🏪 {biz?.allowedCommunities?.join(', ') || 'Clothing & Textiles'}</Text>
+            <Text style={styles.metaText}>
+              🏪 {Array.isArray(biz?.allowedCommunities) ? biz.allowedCommunities.join(', ') : (typeof biz?.allowedCommunities === 'string' ? biz.allowedCommunities : 'All Communities')}
+            </Text>
             <Text style={styles.metaDot}>•</Text>
-            <Text style={styles.metaText}>📍 {biz?.city ? `${biz.city}, ${biz.state}` : 'Surat Market, India'}</Text>
+            <Text style={styles.metaText}>📍 {biz?.city ? `${biz.city}${biz.state ? `, ${biz.state}` : ''}` : 'Location Not Specified'}</Text>
           </View>
 
           {/* Bio Description */}
           <Text style={styles.heroBioText}>
-            Direct manufacturer & exporter of premium catalog items. Supplying verified business buyers & national wholesale networks.
+            {store?.bio || (biz as any)?.bio || 'Verified wholesale business store profile.'}
           </Text>
 
           {/* Hero CTAs */}
@@ -296,28 +298,23 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.credRowCol}>
               <Text style={styles.credLabel}>🏭 Mill & Dispatch Address</Text>
               <Text style={styles.credValSub}>
-                {biz?.streetAddress ? `${biz.streetAddress}, ${biz.city}, ${biz.state} - ${biz.pincode}` : 'GIDC Industrial Market Estate, Surat, Gujarat - 395002'}
+                {biz?.streetAddress ? `${biz.streetAddress}, ${biz.city || ''}, ${biz.state || ''} ${biz.pincode ? `- ${biz.pincode}` : ''}` : 'Location Address Not Specified'}
               </Text>
             </View>
 
             {/* Tax Registrations Card */}
             <View style={styles.taxBox}>
               <View style={styles.taxBoxHeader}>
-                <Text style={styles.taxBoxTitle}>TAX REGISTRATIONS VERIFIED</Text>
-                <Text style={styles.taxBoxCheck}>✓ Verified</Text>
+                <Text style={styles.taxBoxTitle}>TAX REGISTRATIONS & GSTIN</Text>
+                <Text style={styles.taxBoxCheck}>✓ {biz?.gstNumber ? 'Verified' : 'Optional'}</Text>
               </View>
               <View style={styles.taxPillRow}>
                 <View style={styles.taxPill}>
                   <Text style={styles.taxPillText}>
                     GSTIN:{' '}
                     <Text style={styles.taxPillCode}>
-                      {biz?.gstNumber && biz.gstNumber !== 'N/A' ? biz.gstNumber : 'N/A (Not Filed)'}
+                      {biz?.gstNumber && biz.gstNumber !== 'N/A' ? biz.gstNumber : 'Not Filed'}
                     </Text>
-                  </Text>
-                </View>
-                <View style={styles.taxPill}>
-                  <Text style={styles.taxPillText}>
-                    PAN: <Text style={styles.taxPillCode}>AABCS5678K</Text>
                   </Text>
                 </View>
               </View>
@@ -327,14 +324,7 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.termsBox}>
               <Text style={styles.termsTitle}>WHOLESALE TRADE TERMS</Text>
               <Text style={styles.termsText}>
-                {(biz as any)?.tradeTerms ? (
-                  (biz as any).tradeTerms
-                ) : (
-                  <>
-                    Min. Order: <Text style={styles.boldWhite}>₹50,000</Text> • Payment:{' '}
-                    <Text style={styles.boldWhite}>20% Adv, Escrow Protected</Text>
-                  </>
-                )}
+                {(biz as any)?.tradeTerms || 'Standard Wholesale Terms'}
               </Text>
             </View>
           </View>
@@ -368,8 +358,8 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           ) : (
             <View style={styles.gridContainer}>
               {myProducts.map((prod, index) => {
-                const badgeLabel = index % 3 === 0 ? 'Bestseller' : index % 3 === 1 ? 'Hot RFQ' : 'New Drop';
-                const badgeColor = index % 3 === 0 ? '#10b981' : index % 3 === 1 ? '#f59e0b' : '#6366f1';
+                const badgeLabel = prod.isHotSelling ? 'Hot Selling' : 'Verified SKU';
+                const badgeColor = prod.isHotSelling ? '#f59e0b' : '#6366f1';
                 const priceVal = prod.priceTiers?.[0]?.price || 150;
                 return (
                   <TouchableOpacity
@@ -411,16 +401,12 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.sectionTitleText}>🖼️ Verified Shop Photos & Gallery</Text>
           <Text style={styles.sectionSubText}>Photos verified during onboarding inspection</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaRow}>
-            {(biz as any)?.media && (biz as any).media.length > 0 ? (
+            {Array.isArray((biz as any)?.media) && (biz as any).media.length > 0 ? (
               (biz as any).media.map((m: any, idx: number) => (
-                <Image key={m.id || idx} source={{ uri: m.url }} style={styles.mediaThumbImage} />
+                <Image key={m.id || idx} source={{ uri: typeof m === 'string' ? m : m.url }} style={styles.mediaThumbImage} />
               ))
             ) : (
-              <>
-                <Image source={{ uri: 'https://images.unsplash.com/photo-1567401893414-76b7b1e5a7a5?w=500&q=80' }} style={styles.mediaThumbImage} />
-                <Image source={{ uri: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=500&q=80' }} style={styles.mediaThumbImage} />
-                <Image source={{ uri: 'https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=500&q=80' }} style={styles.mediaThumbImage} />
-              </>
+              <Text style={{ color: '#64748b', fontSize: 12, paddingVertical: 8 }}>No shop photos uploaded yet.</Text>
             )}
           </ScrollView>
         </View>
@@ -452,7 +438,7 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
           <TouchableOpacity
             style={styles.menuRow}
-            onPress={() => Linking.openURL('tel:' + (user?.mobileNumber || '9876543210'))}
+            onPress={() => user?.mobileNumber ? Linking.openURL('tel:' + user.mobileNumber) : Alert.alert('Support Line', 'No support number registered.')}
           >
             <Text style={styles.menuIconText}>📞</Text>
             <View style={styles.menuMetaBox}>
