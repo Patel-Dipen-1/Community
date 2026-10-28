@@ -39,3 +39,11 @@ apps/api/src/config/firebase-service-account.json
 # Agent configuration
 .agents/
 
+# Audit Report  
+audit-report/*
+
+# Tests
+tests/*
+
+# Old Data
+            

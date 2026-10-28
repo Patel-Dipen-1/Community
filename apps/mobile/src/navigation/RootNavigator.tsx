@@ -78,7 +78,7 @@ export const RootNavigator: React.FC = () => {
 
       // Listen for notification taps when user clicks on background push / system notification
       const notificationSubscription = PushNotificationService.addNotificationTapListener((response) => {
-        const data = response.notification.request.content.data;
+        const data = response.notification.request.content.data as any;
         if (data && (data.conversationId || data.recipientId) && navigationRef.isReady()) {
           navigationRef.navigate('ChatDetail', {
             conversationId: data.conversationId || '',
@@ -95,6 +95,7 @@ export const RootNavigator: React.FC = () => {
         console.log('📞 GLOBAL INCOMING CALL RECEIVED:', callData);
         if (navigationRef.isReady()) {
           navigationRef.navigate('Call', {
+            callId: callData.callId,
             recipientId: callData.callerUserId,
             recipientName: callData.callerShopName || callData.callerName || 'Supplier',
             recipientAvatar: callData.callerAvatar,
@@ -141,16 +142,18 @@ export const RootNavigator: React.FC = () => {
           recipientId: msg.senderId || '',
           recipientName: senderName,
         });
+        // 3. Mark message as DELIVERED to trigger double grey ticks on sender's device (BUG-005)
+        if (msg.conversationId) {
+          socketService.emit('mark_delivered', { conversationId: msg.conversationId });
+        }
       };
 
-      socketService.on('message:new', handleGlobalMessageReceived);
       socketService.on('receive_message', handleGlobalMessageReceived);
 
       return () => {
         socketService.off('call:incoming');
-        socketService.off('message:new');
         socketService.off('receive_message');
-        notificationSubscription.remove();
+        notificationSubscription?.remove?.();
       };
     }
   }, [isAuthenticated, user?.isVerified, user?.id]);

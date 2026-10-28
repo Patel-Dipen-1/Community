@@ -41,13 +41,29 @@ export interface StatusViewersResponse {
   viewers: StatusViewer[];
 }
 
+export interface PosterConfigResponse {
+  success: boolean;
+  userId: string;
+  fullName: string;
+  shopName: string;
+  isApproved: boolean;
+  allowedCommunities: string[];
+  canSelectMultipleCategories: boolean;
+  defaultCategory: string;
+}
+
 export const statusApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
-    getStatuses: builder.query<{ statuses: StatusItem[] }, { category?: string }>({
+    getStatuses: builder.query<{ statuses: StatusItem[] }, { category?: string } | void>({
       query: (params) => ({
         url: '/status/feed',
-        params,
+        params: params || undefined,
       }),
+      providesTags: ['Status'],
+    }),
+
+    getPosterConfig: builder.query<PosterConfigResponse, void>({
+      query: () => '/status/my-poster-config',
       providesTags: ['Status'],
     }),
 
@@ -75,8 +91,8 @@ export const statusApi = baseApi.injectEndpoints({
 
 export const {
   useGetStatusesQuery,
+  useGetPosterConfigQuery,
   useCreateStatusMutation,
   useViewStatusMutation,
   useGetStatusViewersQuery,
 } = statusApi;
-

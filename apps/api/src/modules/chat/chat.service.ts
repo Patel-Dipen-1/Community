@@ -1,4 +1,5 @@
 import { prisma } from '@b2b/database';
+import { isSuperAdminUser } from '../../utils/superAdmin';
 
 function getNormalizedCommunities(business?: { allowedCommunities?: string[] } | null): string[] {
   if (business?.allowedCommunities && Array.isArray(business.allowedCommunities) && business.allowedCommunities.length > 0) {
@@ -10,14 +11,8 @@ function getNormalizedCommunities(business?: { allowedCommunities?: string[] } |
 function checkCommunityAccess(user1?: any, user2?: any): boolean {
   if (!user1 || !user2) return false;
 
-  const isUser1Admin =
-    user1.email === 'dnpatel2002@gmail.com' ||
-    user1.business?.assignedRole === 'SUPER_ADMIN' ||
-    user1.assignedRole === 'SUPER_ADMIN';
-  const isUser2Admin =
-    user2.email === 'dnpatel2002@gmail.com' ||
-    user2.business?.assignedRole === 'SUPER_ADMIN' ||
-    user2.assignedRole === 'SUPER_ADMIN';
+  const isUser1Admin = isSuperAdminUser(user1);
+  const isUser2Admin = isSuperAdminUser(user2);
 
   if (isUser1Admin || isUser2Admin) return true;
 
@@ -48,9 +43,7 @@ export class ChatService {
 
     const cleanQuery = search.trim();
     const userCommunities = getNormalizedCommunities(currentUser.business);
-    const isSuperAdmin =
-      currentUser.email === 'dnpatel2002@gmail.com' ||
-      currentUser.business?.assignedRole === 'SUPER_ADMIN';
+    const isSuperAdmin = isSuperAdminUser(currentUser);
 
     const users = await prisma.user.findMany({
       where: {
@@ -280,10 +273,22 @@ export class ChatService {
     return validConversations
       .map((c) => {
         const otherUser = c.user1Id === userId ? c.user2 : c.user1;
-        const lastMsg = c.messages[0] || null;
-        const lastTime = lastMsg?.createdAt
-          ? new Date(lastMsg.createdAt).getTime()
-          : new Date(c.updatedAt || c.createdAt).getTime();
+        const lastMsg = c.messages?.[0] || null;
+
+        // BUG-027: Safely calculate sortTime with explicit null handling for conversations with zero messages
+        let sortTime = 0;
+        if (lastMsg?.createdAt) {
+          const t = new Date(lastMsg.createdAt).getTime();
+          if (!isNaN(t)) sortTime = t;
+        }
+        if (!sortTime && c.createdAt) {
+          const t = new Date(c.createdAt).getTime();
+          if (!isNaN(t)) sortTime = t;
+        }
+        if (!sortTime && c.updatedAt) {
+          const t = new Date(c.updatedAt).getTime();
+          if (!isNaN(t)) sortTime = t;
+        }
 
         return {
           conversationId: c.id,
@@ -300,7 +305,7 @@ export class ChatService {
           lastMessage: lastMsg,
           unreadCount: unreadMap[c.id] || 0,
           updatedAt: c.updatedAt,
-          sortTime: lastTime,
+          sortTime,
         };
       })
       .sort((a, b) => b.sortTime - a.sortTime);
@@ -415,8 +420,11 @@ export class ChatService {
         },
       },
       take: limit,
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
+
+    // BUG-016: Reverse messages to chronological order (oldest -> newest) so clients display latest messages
+    messages.reverse();
 
     // Auto mark unread incoming messages in this conversation as READ
     await prisma.message.updateMany({
@@ -567,11 +575,7 @@ export class ChatService {
         const prodCat = (product.community?.slug || 'clothing').toLowerCase();
         const senderComms = getNormalizedCommunities(sender.business);
         const recipientComms = getNormalizedCommunities(recipient.business);
-        const isSuperAdmin =
-          sender.business?.assignedRole === 'SUPER_ADMIN' ||
-          recipient.business?.assignedRole === 'SUPER_ADMIN' ||
-          sender.email === 'dnpatel2002@gmail.com' ||
-          recipient.email === 'dnpatel2002@gmail.com';
+        const isSuperAdmin = isSuperAdminUser(sender) || isSuperAdminUser(recipient);
 
         const senderCanSee = isSuperAdmin || senderComms.includes(prodCat);
         const recipientCanSee = isSuperAdmin || recipientComms.includes(prodCat);
@@ -646,6 +650,7 @@ export class ChatService {
 
       return {
         ...message,
+        recipientId: recipient.id,
         status: message.status || 'SENT',
         replyToMessage: message.replyToMessage
           ? {
@@ -669,7 +674,7 @@ export class ChatService {
             },
           },
         });
-        if (existingMessage) return existingMessage;
+        if (existingMessage) return { ...existingMessage, recipientId: recipient.id };
       }
       throw err;
     }

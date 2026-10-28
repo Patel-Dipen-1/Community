@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MainTabParamList } from '../types/navigation.types';
 import { HomeScreen } from '../screens/main/HomeScreen';
 import { ChatsScreen } from '../screens/main/ChatsScreen';
@@ -29,27 +30,32 @@ const getTabIcon = (routeName: keyof MainTabParamList, focused: boolean) => {
       icon = '👤';
       break;
   }
-  return <Text style={{ fontSize: 18, opacity: focused ? 1 : 0.6 }}>{icon}</Text>;
+  return <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.6 }}>{icon}</Text>;
 };
 
-export const MainNavigator: React.FC = () => {
+export const MainNavigator = () => {
+  const insets = useSafeAreaInsets();
+  const bottomInset = insets.bottom || 0;
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarIcon: ({ focused }) => getTabIcon(route.name, focused),
         tabBarStyle: {
-          backgroundColor: '#0f172a',
+          backgroundColor: '#0b1120',
           borderTopColor: '#1e293b',
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
+          borderTopWidth: 1,
+          height: 58 + bottomInset,
+          paddingBottom: bottomInset > 0 ? bottomInset : 8,
+          paddingTop: 6,
         },
         tabBarActiveTintColor: '#818cf8',
         tabBarInactiveTintColor: '#64748b',
         tabBarLabelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: '700',
+          marginTop: 2,
         },
       })}
     >

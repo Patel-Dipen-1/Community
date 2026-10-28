@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, StatusBar, Platform } from 'react-native';
-import { colors, typography, spacing } from '../../theme/theme';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors } from '../../theme/theme';
 
 interface HeaderProps {
   title: string;
@@ -20,7 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
   rightElement,
 }) => {
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.leftContainer}>
           {showBack && (
@@ -53,47 +54,51 @@ export const Header: React.FC<HeaderProps> = ({
 const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: colors.background,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 10 : 0,
   },
   container: {
-    height: 56,
+    minHeight: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
     backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: '#1e293b',
   },
   leftContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    marginRight: 8,
   },
   backButton: {
-    paddingRight: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingRight: 10,
+    paddingVertical: 4,
   },
   backIcon: {
     color: colors.primaryLight,
-    fontSize: typography.fontSize.xxl,
-    fontWeight: typography.fontWeight.heavy,
+    fontSize: 22,
+    fontWeight: '700',
   },
   titleContainer: {
     flex: 1,
   },
   title: {
     color: colors.textMain,
-    fontSize: typography.fontSize.xl,
-    fontWeight: typography.fontWeight.bold,
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.3,
   },
   subtitle: {
     color: colors.textMuted,
-    fontSize: typography.fontSize.sm,
+    fontSize: 11,
     marginTop: 1,
+    fontWeight: '500',
   },
   rightContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
   },
 });

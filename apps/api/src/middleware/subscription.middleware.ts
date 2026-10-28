@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { SubscriptionService } from '../modules/subscription/subscription.service';
+import { isSuperAdminUser } from '../utils/superAdmin';
 
 export const verifySubscriptionAccess = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -17,17 +18,19 @@ export const verifySubscriptionAccess = async (req: Request, res: Response, next
     }
 
     // Super Admin bypass
-    const userRole = (req as any).user?.assignedRole;
-    const userEmail = (req as any).user?.email;
-    if (userEmail === 'dnpatel2002@gmail.com' || userRole === 'SUPER_ADMIN') {
+    if (isSuperAdminUser((req as any).user)) {
       return next();
     }
 
     const { subscription } = await SubscriptionService.getUserSubscription(userId);
 
-    // If trial is disabled by Super Admin and user status is TRIAL -> update/treat as active or check period
+    // If trial is disabled by Super Admin and user status is TRIAL -> reject access
     if (!settings.freeTrialEnabled && subscription.status === 'TRIAL') {
-      // Trial is OFF: User needs active subscription if payment is enabled
+      return res.status(402).json({
+        error: 'TRIAL_DISABLED',
+        message: 'Free trials are currently disabled. An active subscription is required to access platform features.',
+        settings,
+      });
     }
 
     // If status is EXPIRED

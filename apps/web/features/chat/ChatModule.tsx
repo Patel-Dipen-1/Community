@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useAppDispatch } from '../../lib/redux/hooks';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useGetProfileQuery } from '../../lib/redux/api/authApi';
 import {
+  chatApi,
   useSearchApprovedUsersQuery,
   useGetConversationsQuery,
   useGetConversationMessagesQuery,
@@ -46,6 +48,7 @@ const AVAILABLE_COMMUNITIES = [
 ];
 
 export function ChatModule() {
+  const dispatch = useAppDispatch();
   const searchParams = useSearchParams();
   const router = useRouter();
   const { addToast } = useToast();
@@ -231,14 +234,37 @@ export function ChatModule() {
     const s = getSocket();
     const handleReceiveMessage = (incomingMsg: any) => {
       if (incomingMsg.conversationId === activeConversationId || !incomingMsg.conversationId) {
-        refetchMessages();
-        refetchConversations();
+        if (activeConversationId) {
+          dispatch(
+            chatApi.util.updateQueryData('getConversationMessages', activeConversationId, (draft) => {
+              if (!draft.messages) draft.messages = [];
+              const exists = draft.messages.some(
+                (m) => m.id === incomingMsg.id || (m.clientMessageId && m.clientMessageId === incomingMsg.clientMessageId)
+              );
+              if (!exists) {
+                draft.messages.push(incomingMsg);
+              }
+            })
+          );
+        }
       }
     };
 
     const handleStatusUpdate = (data: any) => {
-      if (data?.conversationId === activeConversationId) {
-        refetchMessages();
+      if (data?.conversationId === activeConversationId && activeConversationId) {
+        dispatch(
+          chatApi.util.updateQueryData('getConversationMessages', activeConversationId, (draft) => {
+            if (draft.messages) {
+              draft.messages.forEach((m) => {
+                if (m.senderId !== data.readBy && data.status === 'READ') {
+                  m.status = 'READ';
+                } else if (data.status === 'DELIVERED') {
+                  m.status = 'DELIVERED';
+                }
+              });
+            }
+          })
+        );
       }
     };
 

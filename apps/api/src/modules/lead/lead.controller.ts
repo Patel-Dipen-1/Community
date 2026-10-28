@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { LeadCaptureSchema } from './lead.validation';
 import { LeadService } from './lead.service';
+import { isSuperAdminUser } from '../../utils/superAdmin';
 
 export class LeadController {
   // Get User Category Config for Lead Creation Form (Rules 2, 3, 4)
@@ -83,10 +84,7 @@ export class LeadController {
   static async adminManage(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const role = (req as any).user?.role;
-      const email = (req as any).user?.email;
-
-      const isSuperAdmin = role === 'SUPER_ADMIN' || email === 'dnpatel2002@gmail.com';
+      const isSuperAdmin = isSuperAdminUser((req as any).user);
       if (!isSuperAdmin) {
         return res.status(403).json({ success: false, error: 'Super Admin privileges required to manage lead rules & batches.' });
       }

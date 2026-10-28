@@ -28,11 +28,11 @@ interface ClothingProductCreateModalProps {
 }
 
 const COMMUNITIES = [
-  { id: 'clothing', name: '👕 Clothing', label: 'Clothing & Textiles' },
-  { id: 'hardware', name: '🔧 Hardware', label: 'Hardware & Tools' },
-  { id: 'jewellery', name: '💎 Jewellery', label: 'Jewellery & Gems' },
-  { id: 'electronics', name: '⚡ Electronics', label: 'Electronics & Electricals' },
-  { id: 'grocery', name: '🌾 Grocery', label: 'Grocery & FMCG' },
+  { id: 'clothing', name: '👕 Clothing', label: 'Clothing & Textiles', icon: '👕', categories: ['Ethnic & Kurtis', 'Sarees & Lehengas', "Men's Wear & Shirts", 'T-Shirts & Casuals', 'Denim & Trousers', 'Fabric Rolls', 'Kids Wear'] },
+  { id: 'hardware', name: '🔧 Hardware', label: 'Hardware & Tools', icon: '🔧', categories: ['Power Tools', 'Hand Tools', 'Fasteners & Bolts', 'Plumbing & Pipes', 'Paints & Chemicals', 'Safety Equipment', 'Machine Parts'] },
+  { id: 'jewellery', name: '💎 Jewellery', label: 'Jewellery & Gems', icon: '💎', categories: ['Gold Jewellery', 'Diamond Jewellery', '1 Gram Gold / Imitation', 'Sterling Silver 925', 'Gemstones & Pearls', 'Bridal Sets'] },
+  { id: 'electronics', name: '⚡ Electronics', label: 'Electronics & Electricals', icon: '⚡', categories: ['Smartphones & Accessories', 'Audio & Speakers', 'Cables & Chargers', 'Home Appliances', 'Circuit Boards & Sensors', 'LED Lighting'] },
+  { id: 'grocery', name: '🌾 Grocery', label: 'Grocery & FMCG', icon: '🌾', categories: ['Spices & Masala', 'Grains & Pulses', 'Edible Oils', 'Dry Fruits & Nuts', 'Packaged Snacks', 'Organic Staples'] },
 ];
 
 const FABRIC_OPTIONS = ['100% Combed Cotton', 'Pure Silk', 'Denim', 'Rayon', 'Chiffon', 'Linen', 'Polyester Blend', 'Georgette', 'Velvet', 'Handloom Linen'];
@@ -585,13 +585,41 @@ export const ClothingProductCreateModal: React.FC<ClothingProductCreateModalProp
 
 
 
+  const defaultCommunityCategoriesMap: Record<string, string[]> = {
+    clothing: clothingCategories,
+    hardware: hardwareCategories,
+    jewellery: jewelleryCategories,
+    jewelry: jewelleryCategories,
+    electronics: electronicsCategories,
+    grocery: groceryCategories,
+  };
+
+  const commRawCats: string[] = (currentComm?.categories || []).map((cat: any) => {
+    if (typeof cat === 'string') return cat.trim();
+    if (cat && typeof cat === 'object') {
+      return String(cat.name || cat.label || cat.title || cat.slug || '').trim();
+    }
+    return '';
+  }).filter((c: string) => c.length > 0 && /[a-z0-9]/i.test(c));
+
+  const baseCommCats = commRawCats.length > 0
+    ? commRawCats
+    : (defaultCommunityCategoriesMap[activeCommunity.toLowerCase()] || ['General Wholesale', 'Bulk Supplies']);
+
   const currentCategoryList = Array.from(
     new Set([
-      ...(currentComm?.categories || []).map((cat: any) => (typeof cat === 'string' ? cat : cat.name)),
+      ...baseCommCats,
       ...(customOptionsMap[`CATEGORY_${activeCommunity.toUpperCase()}`] || []),
       ...(customOptionsMap['CATEGORY'] || []),
     ])
-  );
+  ).filter((cat: any) => typeof cat === 'string' && cat.trim().length > 0 && /[a-z0-9]/i.test(cat));
+
+  // Auto select first valid category if current is blank or not in options
+  useEffect(() => {
+    if (currentCategoryList.length > 0 && (!category || !currentCategoryList.includes(category))) {
+      setCategory(currentCategoryList[0]);
+    }
+  }, [activeCommunity, currentCategoryList.join(',')]);
 
   return (
     <Modal visible={isOpen} animationType="slide" transparent onRequestClose={onClose}>
@@ -1687,7 +1715,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   requestOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     padding: 16,

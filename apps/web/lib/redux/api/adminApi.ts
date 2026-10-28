@@ -34,6 +34,7 @@ const ADMIN_ENDPOINTS = {
   REJECT_VERIFICATION: '/admin/reject-verification',
   TERMINATE_SESSION: '/admin/terminate-session',
   DELETE_ACCOUNT: (userId: string) => `/admin/delete-account/${userId}`,
+  REJECT_DELETION: (userId: string) => `/admin/reject-deletion/${userId}`,
   UPDATE_USER: (userId: string) => `/admin/users/${userId}`,
 } as const;
 
@@ -120,6 +121,14 @@ export const adminApi = baseApi.injectEndpoints({
         method: 'DELETE',
       }),
       invalidatesTags: ['Users', 'Sessions', 'VerificationQueue', 'Deletions'],
+    }),
+
+    rejectDeletionRequest: builder.mutation<{ message?: string; error?: string }, string>({
+      query: (userId) => ({
+        url: ADMIN_ENDPOINTS.REJECT_DELETION(userId),
+        method: 'POST',
+      }),
+      invalidatesTags: ['Users', 'Deletions'],
     }),
 
     createUser: builder.mutation<{ message?: string; error?: string }, any>({
@@ -375,6 +384,7 @@ export const {
   useTerminateSessionMutation,
   useTerminateAllSessionsMutation,
   useDeleteAccountMutation,
+  useRejectDeletionRequestMutation,
   useCreateUserMutation,
   useUpdateUserMutation,
   useGetAdminCommunitiesQuery,

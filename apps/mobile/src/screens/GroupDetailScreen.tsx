@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,15 +13,18 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation.types';
 import { Header } from '../components/common/Header';
-import { useGetGroupByIdQuery, useGetGroupMessagesQuery, useSendGroupMessageMutation } from '../store/api/groupApi';
-import { useAppSelector } from '../hooks/useRedux';
+import { groupApi, useGetGroupByIdQuery, useGetGroupMessagesQuery, useSendGroupMessageMutation } from '../store/api/groupApi';
+import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
+import { socketService } from '../services/socket/socketService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GroupDetail'>;
 
 export const GroupDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { groupId, groupTitle } = route.params;
   const { user } = useAppSelector((state) => state.auth);
+  const dispatch = useAppDispatch();
   const [text, setText] = useState('');
+  const flatListRef = useRef<FlatList>(null);
 
   const { data: groupData } = useGetGroupByIdQuery(groupId);
   const { data: messagesData, refetch } = useGetGroupMessagesQuery({ groupId });
@@ -29,10 +32,58 @@ export const GroupDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const group = groupData?.group;
 
+  // Real-Time Socket Connection for Group Chat (BUG-002 & BUG-013)
+  useEffect(() => {
+    socketService.connect();
+    socketService.joinGroup(groupId);
+
+    const handleReceiveGroupMessage = (msg: any) => {
+      if (msg.groupId === groupId) {
+        dispatch(
+          groupApi.util.updateQueryData('getGroupMessages', { groupId }, (draft) => {
+            const exists = draft.messages?.some(
+              (m) => m.id === msg.id || (m as any).clientMessageId === msg.clientMessageId
+            );
+            if (!exists) {
+              if (!draft.messages) draft.messages = [];
+              draft.messages.push(msg);
+            }
+          })
+        );
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }
+    };
+
+    const handleGroupMessageEdited = (data: any) => {
+      if (data.groupId === groupId) {
+        dispatch(
+          groupApi.util.updateQueryData('getGroupMessages', { groupId }, (draft) => {
+            const target = draft.messages?.find((m) => m.id === data.id || m.id === data.messageId);
+            if (target) {
+              target.text = data.text;
+            }
+          })
+        );
+      }
+    };
+
+    socketService.on('receive_group_message', handleReceiveGroupMessage);
+    socketService.on('group_message_edited', handleGroupMessageEdited);
+
+    return () => {
+      socketService.off('receive_group_message', handleReceiveGroupMessage);
+      socketService.off('group_message_edited', handleGroupMessageEdited);
+      socketService.leaveGroup(groupId);
+    };
+  }, [groupId, dispatch]);
+
   const handleSend = async () => {
     if (!text.trim()) return;
+    const clientMessageId = `grp-${Date.now()}`;
     try {
-      await sendGroupMsg({ groupId, text: text.trim() }).unwrap();
+      await sendGroupMsg({ groupId, text: text.trim(), clientMessageId }).unwrap();
       setText('');
       refetch();
     } catch (err: any) {
@@ -54,9 +105,11 @@ export const GroupDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <FlatList
+          ref={flatListRef}
           data={messagesData?.messages || []}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messagesList}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) => {
             const isMe = item.senderId === user?.id;
             return (
@@ -71,7 +124,7 @@ export const GroupDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           }}
         />
 
-        {(!group?.onlyAdminCanPost || group?.roleInGroup === 'ADMIN') && (
+        {(!group?.onlyAdminCanPost || (group as any)?.isViewerAdmin || (group as any)?.roleInGroup === 'ADMIN' || group?.createdById === user?.id) && (
           <View style={styles.inputBar}>
             <TextInput
               style={styles.input}

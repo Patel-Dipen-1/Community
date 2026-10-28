@@ -225,7 +225,7 @@ export class GroupController {
   // GET /api/v1/groups/global-capacity - Get default global max capacity limit
   static async getGlobalCapacity(_req: Request, res: Response) {
     try {
-      const maxCapacity = GroupService.getGlobalGroupCapacity();
+      const maxCapacity = await GroupService.getGlobalGroupCapacity();
       res.json({ maxCapacity });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -239,7 +239,7 @@ export class GroupController {
       if (!maxCapacity || isNaN(Number(maxCapacity))) {
         return res.status(400).json({ error: 'Valid maxCapacity number is required' });
       }
-      const newCapacity = GroupService.setGlobalGroupCapacity(Number(maxCapacity));
+      const newCapacity = await GroupService.setGlobalGroupCapacity(Number(maxCapacity));
       res.json({
         message: `Super Admin set default global group capacity limit to ${newCapacity} members.`,
         maxCapacity: newCapacity,

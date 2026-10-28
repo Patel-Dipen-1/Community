@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,11 @@ import {
   Image,
   Alert,
 } from 'react-native';
+import { Audio } from 'expo-av';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation.types';
 import { colors, spacing, borderRadius } from '../theme/theme';
-import { useLogCallMutation } from '../store/api/callApi';
-
+import { useLogCallMutation, useGetLiveKitTokenMutation } from '../store/api/callApi';
 import { socketService } from '../services/socket/socketService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Call'>;
@@ -19,16 +19,101 @@ type CallState = 'INCOMING' | 'DIALING' | 'CONNECTED' | 'ENDED';
 
 export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
   const { recipientId, recipientName, recipientAvatar, callType = 'AUDIO', isIncoming = false } = route.params;
+  const incomingCallId = (route.params as any)?.callId;
 
   const [callState, setCallState] = useState<CallState>(isIncoming ? 'INCOMING' : 'DIALING');
+  const [activeCallId, setActiveCallId] = useState<string | undefined>(incomingCallId);
   const [durationSecs, setDurationSecs] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(callType === 'VIDEO');
+  const [remoteMuted, setRemoteMuted] = useState(false);
+  const [rtcToken, setRtcToken] = useState<string | null>(null);
 
+  const ringSoundRef = useRef<Audio.Sound | null>(null);
   const [logCall] = useLogCallMutation();
+  const [getLiveKitToken] = useGetLiveKitTokenMutation();
 
-  // Socket call invitation & status listeners
+  // BUG-011: Audio session & ringtone lifecycle management via expo-av
+  useEffect(() => {
+    let isMounted = true;
+
+    const stopRingSound = async () => {
+      const activeSound = ringSoundRef.current;
+      if (activeSound) {
+        ringSoundRef.current = null;
+        await activeSound.stopAsync().catch(() => {});
+        await activeSound.unloadAsync().catch(() => {});
+      }
+    };
+
+    const setupCallAudio = async () => {
+      try {
+        await stopRingSound();
+
+        if (callState === 'DIALING' || callState === 'INCOMING') {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+          });
+
+          const soundUri =
+            callState === 'DIALING'
+              ? 'https://actions.google.com/sounds/v1/telephones/phone_calling.ogg'
+              : 'https://actions.google.com/sounds/v1/telephones/ring_tone.ogg';
+
+          const { sound } = await Audio.Sound.createAsync(
+            { uri: soundUri },
+            { shouldPlay: true, isLooping: true, volume: 0.8 }
+          );
+          if (isMounted) {
+            ringSoundRef.current = sound;
+          } else {
+            sound.unloadAsync().catch(() => {});
+          }
+        } else if (callState === 'CONNECTED') {
+          await stopRingSound();
+
+          // Activate in-call duplex audio communication mode
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+          });
+
+          // Request LiveKit RTC token for active room session
+          if (activeCallId) {
+            getLiveKitToken({ roomName: activeCallId })
+              .unwrap()
+              .then((res) => {
+                if (isMounted) setRtcToken(res.token);
+                // Relay WebRTC offer if initiator
+                if (!isIncoming) {
+                  socketService.emit('call:offer', {
+                    callId: activeCallId,
+                    targetUserId: recipientId,
+                    sdp: { type: 'offer', room: res.roomName },
+                  });
+                }
+              })
+              .catch((err) => console.warn('LiveKit RTC token fetch notice:', err));
+          }
+        } else if (callState === 'ENDED') {
+          await stopRingSound();
+        }
+      } catch (err) {
+        console.warn('Audio call management notice:', err);
+      }
+    };
+
+    setupCallAudio();
+
+    return () => {
+      isMounted = false;
+      stopRingSound();
+    };
+  }, [callState, activeCallId]);
+
+  // Socket call invitation, signaling & status listeners
   useEffect(() => {
     socketService.connect();
 
@@ -40,8 +125,15 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
       });
     }
 
-    const handleCallAccepted = () => {
+    const handleCallRinging = (data: any) => {
+      if (data?.callId) {
+        setActiveCallId(data.callId);
+      }
+    };
+
+    const handleCallAccepted = (data: any) => {
       console.log('📞 Remote party accepted call');
+      if (data?.callId) setActiveCallId(data.callId);
       setCallState('CONNECTED');
     };
 
@@ -60,16 +152,73 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
       if (navigation.canGoBack()) navigation.goBack();
     };
 
+    const handleCallTimedOut = () => {
+      console.log('📞 Call timed out (no answer)');
+      Alert.alert('Call Unavailable', 'The user did not answer the call.');
+      setCallState('ENDED');
+      setTimeout(() => {
+        if (navigation.canGoBack()) navigation.goBack();
+      }, 1000);
+    };
+
+    const handleCallCancelled = () => {
+      console.log('📞 Caller cancelled the call');
+      setCallState('ENDED');
+      setTimeout(() => {
+        if (navigation.canGoBack()) navigation.goBack();
+      }, 800);
+    };
+
+    // WebRTC SDP and Candidate relay handlers
+    const handleRemoteOffer = (data: any) => {
+      console.log('📞 Received remote call:offer', data);
+      if (data?.callId) {
+        socketService.emit('call:answer', {
+          callId: data.callId,
+          targetUserId: data.callerUserId,
+          sdp: { type: 'answer', room: data.callId },
+        });
+      }
+    };
+
+    const handleRemoteAnswer = (data: any) => {
+      console.log('📞 Received remote call:answer', data);
+    };
+
+    const handleRemoteIce = (data: any) => {
+      console.log('📞 Received remote call:ice-candidate', data);
+    };
+
+    const handleMuteStatus = (data: any) => {
+      if (typeof data?.isMuted === 'boolean') {
+        setRemoteMuted(data.isMuted);
+      }
+    };
+
+    socketService.on('call:ringing', handleCallRinging);
     socketService.on('call:accepted', handleCallAccepted);
     socketService.on('call:ended', handleCallEnded);
     socketService.on('call:rejected', handleCallEnded);
+    socketService.on('call:timed_out', handleCallTimedOut);
+    socketService.on('call:cancelled', handleCallCancelled);
     socketService.on('call:error', handleCallError);
+    socketService.on('call:offer', handleRemoteOffer);
+    socketService.on('call:answer', handleRemoteAnswer);
+    socketService.on('call:ice-candidate', handleRemoteIce);
+    socketService.on('call:mute_status', handleMuteStatus);
 
     return () => {
+      socketService.off('call:ringing', handleCallRinging);
       socketService.off('call:accepted', handleCallAccepted);
       socketService.off('call:ended', handleCallEnded);
       socketService.off('call:rejected', handleCallEnded);
+      socketService.off('call:timed_out', handleCallTimedOut);
+      socketService.off('call:cancelled', handleCallCancelled);
       socketService.off('call:error', handleCallError);
+      socketService.off('call:offer', handleRemoteOffer);
+      socketService.off('call:answer', handleRemoteAnswer);
+      socketService.off('call:ice-candidate', handleRemoteIce);
+      socketService.off('call:mute_status', handleMuteStatus);
     };
   }, [isIncoming, recipientId, callType]);
 
@@ -89,18 +238,50 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
   // Handle Accept Call (Incoming)
   const handleAcceptCall = async () => {
     setCallState('CONNECTED');
-    socketService.emit('call:accept', { targetUserId: recipientId });
+    socketService.emit('call:accept', {
+      callId: activeCallId,
+      callerUserId: recipientId,
+      targetUserId: recipientId,
+    });
+  };
+
+  const handleToggleMute = () => {
+    const nextMute = !isMuted;
+    setIsMuted(nextMute);
+    socketService.emit('call:mute_status', {
+      callId: activeCallId,
+      targetUserId: recipientId,
+      isMuted: nextMute,
+    });
+  };
+
+  const handleToggleSpeaker = async () => {
+    const nextSpeaker = !isSpeaker;
+    setIsSpeaker(nextSpeaker);
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+    } catch (e) {
+      console.warn('Audio mode toggle notice:', e);
+    }
   };
 
   // Handle Reject / Decline Call (Incoming)
   const handleRejectCall = async () => {
-    socketService.emit('call:reject', { targetUserId: recipientId });
+    socketService.emit('call:reject', {
+      callId: activeCallId,
+      callerUserId: recipientId,
+      targetUserId: recipientId,
+    });
     try {
       await logCall({
         receiverId: recipientId,
         callType,
         status: 'REJECTED',
         durationSecs: 0,
+        livekitRoom: activeCallId,
       }).unwrap();
     } catch (e) {
       console.warn('Call log network notice:', e);
@@ -111,7 +292,10 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Handle End Call (Active or Dialing)
   const handleEndCall = async () => {
-    socketService.emit('call:end', { targetUserId: recipientId });
+    socketService.emit('call:end', {
+      callId: activeCallId,
+      targetUserId: recipientId,
+    });
     const finalStatus = callState === 'CONNECTED' ? 'CONNECTED' : 'MISSED';
     try {
       await logCall({
@@ -119,6 +303,7 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
         callType,
         status: finalStatus,
         durationSecs,
+        livekitRoom: activeCallId,
       }).unwrap();
     } catch (e) {
       console.warn('Call log network notice:', e);
@@ -161,6 +346,11 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
         )}
         <Text style={styles.recipientName}>{recipientName}</Text>
         <Text style={styles.subtitleText}>Verified Business Partner</Text>
+        {remoteMuted && (
+          <View style={{ marginTop: 8, paddingHorizontal: 12, paddingVertical: 4, backgroundColor: 'rgba(239, 68, 68, 0.2)', borderRadius: 12 }}>
+            <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>🔇 Partner microphone muted</Text>
+          </View>
+        )}
       </View>
 
       {/* Mid Control Actions (Mute, Speaker, Video toggle) */}
@@ -168,7 +358,7 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
         <View style={styles.controlsRow}>
           <TouchableOpacity
             style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
-            onPress={() => setIsMuted(!isMuted)}
+            onPress={handleToggleMute}
           >
             <Text style={styles.controlIcon}>{isMuted ? '🔇' : '🎙️'}</Text>
             <Text style={styles.controlLabel}>{isMuted ? 'Unmute' : 'Mute'}</Text>
@@ -176,7 +366,7 @@ export const CallScreen: React.FC<Props> = ({ route, navigation }) => {
 
           <TouchableOpacity
             style={[styles.controlBtn, isSpeaker && styles.controlBtnActive]}
-            onPress={() => setIsSpeaker(!isSpeaker)}
+            onPress={handleToggleSpeaker}
           >
             <Text style={styles.controlIcon}>🔊</Text>
             <Text style={styles.controlLabel}>{isSpeaker ? 'Earpiece' : 'Speaker'}</Text>

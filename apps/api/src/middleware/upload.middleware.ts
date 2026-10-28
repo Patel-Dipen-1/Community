@@ -2,20 +2,23 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-const uploadBaseDir = path.join(__dirname, '../../uploads');
+const uploadBaseDir = path.resolve(__dirname, '../../uploads');
 
-// Disk Storage configuration with dynamic user/shop folder creation
+// Ensure base upload directory exists
+if (!fs.existsSync(uploadBaseDir)) {
+  fs.mkdirSync(uploadBaseDir, { recursive: true });
+}
+
+// Disk Storage configuration with strict sandboxed folder creation (BUG-038)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Determine folder name from user header, body, or default fallback
-    const rawFolderName =
-      (req.headers['x-user-folder'] as string) ||
-      req.body?.userFolder ||
-      req.body?.fullName ||
-      req.body?.shopName ||
-      'general';
+    // BUG-038: Bind destination strictly to verified authenticated user ID
+    // Reject untrusted headers/client bodies to prevent directory traversal
+    const authUserId = (req as any).user?.userId || (req as any).user?.id;
+    const cleanFolder = authUserId
+      ? String(authUserId).toLowerCase().trim().replace(/[^a-z0-9_-]/g, '_')
+      : 'general';
 
-    const cleanFolder = rawFolderName.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
     const fileCategory = file.mimetype.startsWith('video/')
       ? 'videos'
       : file.mimetype.startsWith('image/')
@@ -23,9 +26,14 @@ const storage = multer.diskStorage({
       : file.mimetype.startsWith('audio/')
       ? 'audios'
       : 'documents';
-    const targetDir = path.join(uploadBaseDir, 'users', cleanFolder, fileCategory);
 
-    // Auto-create user-specific image and video folders if missing
+    const targetDir = path.resolve(uploadBaseDir, 'users', cleanFolder, fileCategory);
+
+    // Defense-in-depth: Ensure target directory cannot escape uploadBaseDir
+    if (!targetDir.startsWith(uploadBaseDir)) {
+      return cb(new Error('INVALID_PATH: Directory path traversal attempt rejected'), '');
+    }
+
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
@@ -35,22 +43,62 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const ext = path.extname(file.originalname).toLowerCase();
-    const cleanName = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9]/g, '_');
+    const cleanName = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
     cb(null, `${cleanName}-${uniqueSuffix}${ext}`);
   },
 });
 
-// File filter for supported images, video, and document formats
+// BUG-039: Whitelist of strictly permitted file extensions for media & documents
+const ALLOWED_EXTENSIONS = new Set([
+  // Images
+  '.jpg', '.jpeg', '.png', '.webp', '.gif',
+  // Videos
+  '.mp4', '.mov', '.webm', '.m4v',
+  // Audio
+  '.mp3', '.m4a', '.ogg', '.wav', '.aac',
+  // Documents
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt',
+]);
+
+const ALLOWED_MIME_PREFIXES = [
+  'image/',
+  'video/',
+  'audio/',
+  'application/pdf',
+  'text/csv',
+  'text/plain',
+  'application/msword',
+  'application/vnd.',
+];
+
+// File filter enforcing strict whitelist
 const fileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
-  // Allow all standard image, video, pdf, document, text, zip and application file types
+  const ext = path.extname(file.originalname).toLowerCase();
+
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    return cb(
+      new Error(
+        `FORBIDDEN_FILE_TYPE: File extension '${ext}' is not permitted. Only verified media and documents are allowed.`
+      )
+    );
+  }
+
+  const isMimeAllowed = ALLOWED_MIME_PREFIXES.some((prefix) => file.mimetype.startsWith(prefix));
+  if (!isMimeAllowed) {
+    return cb(
+      new Error(
+        `FORBIDDEN_FILE_TYPE: MIME type '${file.mimetype}' is not permitted. Only verified media and documents are allowed.`
+      )
+    );
+  }
+
   cb(null, true);
 };
-
 
 export const uploadMiddleware = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max file size for videos/images
+    fileSize: 50 * 1024 * 1024, // 50MB max file size
   },
 });

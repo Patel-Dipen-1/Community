@@ -1,4 +1,5 @@
 import { prisma } from '@b2b/database';
+import { isSuperAdminUser, isSuperAdminEmail } from '../../utils/superAdmin';
 
 export class LeadService {
   /**
@@ -230,9 +231,8 @@ export class LeadService {
 
     const isSuperAdmin =
       tokenRole === 'SUPER_ADMIN' ||
-      tokenEmail === 'dnpatel2002@gmail.com' ||
-      user.email === 'dnpatel2002@gmail.com' ||
-      user.business?.assignedRole === 'SUPER_ADMIN';
+      isSuperAdminEmail(tokenEmail) ||
+      isSuperAdminUser(user);
 
     // Rule 10: Super Admin View
     if (isSuperAdmin) {

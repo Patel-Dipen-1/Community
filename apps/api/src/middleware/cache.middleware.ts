@@ -33,12 +33,25 @@ export const cacheResponse = (durationSeconds: number = 60) => {
       return next();
     }
 
-    // 2. Do NOT cache requests containing user authorization unless safe
-    if (req.headers.authorization && !req.query.public) {
+    // 2. Bypass cache if client explicitly asks for fresh data
+    if (req.headers['cache-control'] === 'no-cache' || req.headers['cache-control'] === 'no-store') {
       return next();
     }
 
-    const key = `cache:${req.originalUrl || req.url}`;
+    // 3. Determine partition scope to isolate public vs authenticated users (BUG-025 & BUG-026)
+    let userScope = 'public';
+    if (req.headers.authorization) {
+      // Authenticated requests must NEVER share public cache partition
+      const authUser = (req as any).user?.userId || (req as any).user?.id || (req as any).userId;
+      if (authUser) {
+        userScope = `user:${authUser}`;
+      } else {
+        const token = req.headers.authorization.replace(/^Bearer\s+/i, '').trim();
+        userScope = `auth:${token.slice(-24)}`;
+      }
+    }
+
+    const key = `cache:${userScope}:${req.originalUrl || req.url}`;
     const cached = memoryCache.get(key);
 
     if (cached) {

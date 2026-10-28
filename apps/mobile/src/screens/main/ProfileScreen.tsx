@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  useWindowDimensions,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -9,7 +10,6 @@ import {
   Alert,
   Linking,
   Image,
-  FlatList,
   Dimensions,
   RefreshControl,
 } from 'react-native';
@@ -18,11 +18,15 @@ import { MainTabParamList, RootStackParamList } from '../../types/navigation.typ
 import { Header } from '../../components/common/Header';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
+import { ClothingProductCreateModal } from '../../components/ClothingProductCreateModal';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
 import { authService } from '../../services/auth/authService';
 import { useGetMyStoreQuery } from '../../store/api/storeApi';
-import { useCreateProductMutation } from '../../store/api/productApi';
-import { useUpdateProfileMutation as useUpdateUserProfileMutation, useGetProfileQuery } from '../../services/api/authApi';
+import {
+  useUpdateProfileMutation as useUpdateUserProfileMutation,
+  useGetProfileQuery,
+  useRequestAccountDeletionMutation,
+} from '../../services/api/authApi';
 
 type Props = NativeStackScreenProps<MainTabParamList & RootStackParamList, 'Profile'>;
 
@@ -31,13 +35,21 @@ const GRID_COLUMN_WIDTH = (width - 48) / 3; // 3-column layout grid
 
 export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const dispatch = useAppDispatch();
+  const { width: windowWidth } = useWindowDimensions();
+  const [catalogContainerWidth, setCatalogContainerWidth] = useState<number>(0);
+
+  // Responsive 3-column width calculation:
+  // Total horizontal padding is 64px (32px on scrollContent + 32px on sectionCard).
+  // Two 8px gaps between 3 columns = 16px.
+  const containerWidth = catalogContainerWidth > 0 ? catalogContainerWidth : (windowWidth - 64);
+  const responsiveCardWidth = Math.max(88, Math.floor((containerWidth - 16) / 3));
   const { user: authUser } = useAppSelector((state) => state.auth);
 
   // Profile and Store queries with refetch capabilities
   const { data: profileData, refetch: refetchProfile } = useGetProfileQuery();
   const { data: storeData, isLoading: isStoreLoading, refetch: refetchStore } = useGetMyStoreQuery();
   const [updateUserProfile] = useUpdateUserProfileMutation();
-  const [createProduct, { isLoading: isCreatingProduct }] = useCreateProductMutation();
+  const [requestAccountDeletion] = useRequestAccountDeletionMutation();
 
   const user = profileData?.user || authUser;
 
@@ -56,16 +68,15 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [editCity, setEditCity] = useState(user?.business?.city || '');
   const [editState, setEditState] = useState(user?.business?.state || '');
   const [editPincode, setEditPincode] = useState(user?.business?.pincode || '');
-  const [editGstNumber, setEditGstNumber] = useState(user?.business?.gstNumber || '');
+  const [editGstNumber, setEditGstNumber] = useState(
+    user?.business?.gstNumber && user?.business?.gstNumber !== 'N/A' ? user.business.gstNumber : ''
+  );
   const [editBio, setEditBio] = useState('');
   const [editTradeTerms, setEditTradeTerms] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  const [addProductModal, setAddProductModal] = useState(false);
-  const [prodTitle, setProdTitle] = useState('');
-  const [prodPrice, setProdPrice] = useState('');
-  const [prodMOQ, setProdMOQ] = useState('100');
-  const [prodImage, setProdImage] = useState('');
+  // Universal Dynamic Product Create Modal (Identical to Store)
+  const [addProductModalOpen, setAddProductModalOpen] = useState(false);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -85,7 +96,9 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     setEditCity(user?.business?.city || '');
     setEditState(user?.business?.state || '');
     setEditPincode(user?.business?.pincode || '');
-    setEditGstNumber(user?.business?.gstNumber && user?.business?.gstNumber !== 'N/A' ? user.business.gstNumber : '');
+    setEditGstNumber(
+      user?.business?.gstNumber && user?.business?.gstNumber !== 'N/A' ? user.business.gstNumber : ''
+    );
     setEditBio(storeData?.store?.bio || '');
     setEditTradeTerms((user?.business as any)?.tradeTerms || '');
     setEditProfileModal(true);
@@ -129,53 +142,56 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const handleAddProduct = async () => {
-    if (!prodTitle.trim() || !prodPrice.trim()) {
-      Alert.alert('Missing Fields', 'Please provide Product Title and Price.');
-      return;
-    }
-    try {
-      await createProduct({
-        title: prodTitle.trim(),
-        description: 'Direct Mill Quality Bulk Wholesale Item',
-        code: `PROD-${Date.now().toString().slice(-4)}`,
-        moq: parseInt(prodMOQ, 10) || 100,
-        priceTiers: [{ minQty: 1, price: parseFloat(prodPrice) || 100 }],
-        images: [prodImage.trim() || 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=500&q=80'],
-        isHotSelling: true,
-      } as any).unwrap();
-
-      setAddProductModal(false);
-      setProdTitle('');
-      setProdPrice('');
-      setProdImage('');
-      refetchStore();
-      Alert.alert('Success', 'Product added to your dynamic catalog!');
-    } catch (err: any) {
-      Alert.alert('Add Product Error', err?.data?.error || 'Failed to add product.');
-    }
-  };
-
-  const handleAccountDeletionRequest = () => {
+  const handleAccountDeletionRequest = async () => {
     if (!deletionReason.trim()) {
       Alert.alert('Reason Required', 'Please enter a brief reason for requesting account deletion.');
       return;
     }
 
     setIsSubmittingDelete(true);
-    setTimeout(() => {
+    try {
+      await requestAccountDeletion({ reason: deletionReason.trim() }).unwrap();
       setIsSubmittingDelete(false);
       setDeleteModalVisible(false);
+      setDeletionReason('');
+      await refetchProfile();
       Alert.alert(
-        'Deletion Request Submitted',
-        'Your request has been sent to Super Admin for approval as per Apple & Google compliance policies.'
+        '✅ Deletion Request Submitted',
+        'Your account deletion request has been submitted to Super Admin for compliance approval as per Apple & Google compliance policies.'
       );
-    }, 1200);
+    } catch (err: any) {
+      setIsSubmittingDelete(false);
+      Alert.alert('Error', err?.data?.error || err?.message || 'Failed to submit account deletion request.');
+    }
   };
 
   const biz = user?.business;
   const store = storeData?.store;
-  const myProducts = store?.products || [];
+
+  const rawCommunities: any = biz?.allowedCommunities || (user as any)?.allowedCommunities || [];
+  const allowedCommList: string[] = (
+    Array.isArray(rawCommunities)
+      ? rawCommunities
+      : typeof rawCommunities === 'string'
+      ? rawCommunities.split(',')
+      : []
+  )
+    .map((c: any) => (typeof c === 'string' ? c.trim() : (c?.name || c?.slug || '').trim()))
+    .filter((c: string) => c.length > 0 && /[a-z0-9]/i.test(c));
+  const displayCommList = allowedCommList.length > 0 ? allowedCommList : ['Wholesale Trade'];
+
+  const rawShopMedia = (biz as any)?.media || (storeData as any)?.store?.media || (biz as any)?.photos || [];
+  const shopMediaItems: any[] = Array.isArray(rawShopMedia)
+    ? rawShopMedia.filter((m: any) => Boolean(typeof m === 'string' ? m : m?.url))
+    : [];
+  const hasShopMedia = shopMediaItems.length > 0;
+
+  // Extract products from both storeData.products (primary API response) and store.products
+  const myProducts: any[] = (storeData as any)?.products || store?.products || [];
+
+  const handleNavigateToStore = () => {
+    navigation.navigate('Main', { screen: 'Store' } as any);
+  };
 
   return (
     <View style={styles.container}>
@@ -209,7 +225,9 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.avatarWrapper}>
             <View style={styles.avatarGlowRing}>
               <View style={styles.avatarInner}>
-                <Text style={styles.avatarInitial}>{user?.fullName?.charAt(0).toUpperCase() || 'B'}</Text>
+                <Text style={styles.avatarInitial}>
+                  {user?.fullName?.charAt(0).toUpperCase() || 'B'}
+                </Text>
               </View>
             </View>
             <View style={styles.verifiedBadgeCircle}>
@@ -229,13 +247,22 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.heroOwnerName}>{user?.fullName || 'Business Owner'}</Text>
           <Text style={styles.heroShopName}>{biz?.shopName || 'Wholesale Business Store'}</Text>
 
-          {/* Category & Location */}
-          <View style={styles.metaBadgeRow}>
-            <Text style={styles.metaText}>
-              🏪 {Array.isArray(biz?.allowedCommunities) ? biz.allowedCommunities.join(', ') : (typeof biz?.allowedCommunities === 'string' ? biz.allowedCommunities : 'All Communities')}
+          {/* Responsive Allowed Communities Badges & Clean Location */}
+          <View style={styles.communitiesWrapper}>
+            {displayCommList.map((comm: string, idx: number) => {
+              const clean = comm.charAt(0).toUpperCase() + comm.slice(1);
+              return (
+                <View key={idx} style={styles.communityChip}>
+                  <Text style={styles.communityChipText}>🏷️ {clean}</Text>
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.locationPill}>
+            <Text style={styles.locationPillText}>
+              📍 {biz?.city ? (biz.city + (biz.state ? ', ' + biz.state : '')) : 'Location Not Specified'}
             </Text>
-            <Text style={styles.metaDot}>•</Text>
-            <Text style={styles.metaText}>📍 {biz?.city ? `${biz.city}${biz.state ? `, ${biz.state}` : ''}` : 'Location Not Specified'}</Text>
           </View>
 
           {/* Bio Description */}
@@ -249,13 +276,18 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.primaryBtnText}>✏️ Edit Profile</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.iconBtn} onPress={() => Alert.alert('Store QR Code', `Store QR Code for ${biz?.shopName || 'My Business'}`)}>
+            <TouchableOpacity
+              style={styles.iconBtn}
+              onPress={() =>
+                Alert.alert('Store QR Code', 'Store QR Code for ' + (biz?.shopName || 'My Business'))
+              }
+            >
               <Text style={styles.iconBtnText}>📱</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.iconBtnWhatsApp}
-              onPress={() => Linking.openURL(`https://wa.me/91${user?.mobileNumber || ''}`)}
+              onPress={() => Linking.openURL('https://wa.me/91' + (user?.mobileNumber || ''))}
             >
               <Text style={styles.iconBtnText}>💬</Text>
             </TouchableOpacity>
@@ -298,7 +330,9 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.credRowCol}>
               <Text style={styles.credLabel}>🏭 Mill & Dispatch Address</Text>
               <Text style={styles.credValSub}>
-                {biz?.streetAddress ? `${biz.streetAddress}, ${biz.city || ''}, ${biz.state || ''} ${biz.pincode ? `- ${biz.pincode}` : ''}` : 'Location Address Not Specified'}
+                {biz?.streetAddress
+                  ? (biz.streetAddress + ', ' + (biz.city || '') + ', ' + (biz.state || '') + (biz.pincode ? ' - ' + biz.pincode : ''))
+                  : 'Location Address Not Specified'}
               </Text>
             </View>
 
@@ -333,14 +367,31 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         {/* 3. My Product Catalog (3-Column Grid) */}
         <View style={styles.sectionCard}>
           <View style={styles.cardHeaderRow}>
-            <View style={styles.cardHeaderTitleBox}>
+            <TouchableOpacity
+              style={styles.cardHeaderTitleBox}
+              activeOpacity={0.7}
+              onPress={handleNavigateToStore}
+            >
               <Text style={styles.cardHeaderTitle}>My Catalog</Text>
               <View style={styles.countBadge}>
                 <Text style={styles.countBadgeText}>{myProducts.length}</Text>
               </View>
-            </View>
+            </TouchableOpacity>
+
             <View style={styles.catalogHeaderActions}>
-              <TouchableOpacity style={styles.addBtnSmall} onPress={() => setAddProductModal(true)}>
+              <TouchableOpacity
+                style={styles.viewStoreLink}
+                onPress={handleNavigateToStore}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.viewStoreLinkText}>View Store ➔</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.addBtnSmall}
+                onPress={() => setAddProductModalOpen(true)}
+                activeOpacity={0.8}
+              >
                 <Text style={styles.addBtnSmallText}>+ Add</Text>
               </TouchableOpacity>
             </View>
@@ -352,64 +403,119 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.emptyCatalogBox}>
               <Text style={styles.emptyCatalogIcon}>📦</Text>
               <Text style={styles.emptyCatalogTitle}>No Products in Catalog</Text>
-              <Text style={styles.emptyCatalogSub}>Add your products to display in the 3-column wholesale store.</Text>
-              <Button title="+ Add First Product" onPress={() => setAddProductModal(true)} style={{ marginTop: 12 }} />
+              <Text style={styles.emptyCatalogSub}>
+                Add your products to display in the 3-column wholesale store.
+              </Text>
+              <Button
+                title="+ Add First Product"
+                onPress={() => setAddProductModalOpen(true)}
+                style={{ marginTop: 12 }}
+              />
             </View>
           ) : (
-            <View style={styles.gridContainer}>
-              {myProducts.map((prod, index) => {
-                const badgeLabel = prod.isHotSelling ? 'Hot Selling' : 'Verified SKU';
-                const badgeColor = prod.isHotSelling ? '#f59e0b' : '#6366f1';
-                const priceVal = prod.priceTiers?.[0]?.price || 150;
-                return (
-                  <TouchableOpacity
-                    key={prod.id || index}
-                    style={styles.gridCard}
-                    activeOpacity={0.8}
-                    onPress={() => navigation.navigate('ProductDetail', { productId: prod.id })}
-                  >
-                    <View style={styles.gridImageWrapper}>
-                      <Image
-                        source={{ uri: prod.images?.[0] || 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=500&q=80' }}
-                        style={styles.gridImage}
-                      />
-                      <View style={[styles.gridBadgeOverlay, { backgroundColor: badgeColor }]}>
-                        <Text style={styles.gridBadgeText}>{badgeLabel}</Text>
-                      </View>
-                    </View>
+            <View>
+              <View
+                style={styles.gridContainer}
+                onLayout={(e) => {
+                  const w = Math.floor(e.nativeEvent.layout.width);
+                  if (w > 0 && w !== catalogContainerWidth) {
+                    setCatalogContainerWidth(w);
+                  }
+                }}
+              >
+                {myProducts.slice(0, 6).map((prod: any, index: number) => {
+                  const isHot = Boolean(prod.isHotSelling);
+                  const badgeLabel = isHot ? '🔥 Hot' : (prod.code ? prod.code.replace(/^SKU-/, '') : 'SKU');
+                  const badgeColor = isHot ? '#f59e0b' : '#6366f1';
+                  const priceVal = prod.priceTiers?.[0]?.price || prod.price || 150;
+                  const imgUrl =
+                    (Array.isArray(prod.images) && prod.images[0]) ||
+                    prod.image ||
+                    'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=500&q=80';
 
-                    <View style={styles.gridCardMeta}>
-                      <Text style={styles.gridTitle} numberOfLines={1}>
-                        {prod.title}
-                      </Text>
-                      <Text style={styles.gridSub} numberOfLines={1}>
-                        MOQ {prod.moq || 100} units
-                      </Text>
-                      <Text style={styles.gridPrice}>
-                        ₹{priceVal} <Text style={styles.gridUnit}>/unit</Text>
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+                  return (
+                    <TouchableOpacity
+                      key={prod.id || index}
+                      style={[styles.gridCard, { width: responsiveCardWidth }]}
+                      activeOpacity={0.8}
+                      onPress={handleNavigateToStore}
+                    >
+                      <View style={[styles.gridImageWrapper, { height: responsiveCardWidth }]}>
+                        <Image
+                          source={{ uri: imgUrl }}
+                          style={styles.gridImage}
+                          resizeMode="cover"
+                        />
+                        <View style={[styles.gridBadgeOverlay, { backgroundColor: badgeColor }]}>
+                          <Text style={styles.gridBadgeText} numberOfLines={1}>
+                            {badgeLabel}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.gridCardMeta}>
+                        <Text style={styles.gridTitle} numberOfLines={1}>
+                          {prod.title}
+                        </Text>
+                        <Text style={styles.gridSub} numberOfLines={1}>
+                          MOQ {prod.moq || 1} units
+                        </Text>
+                        <Text style={styles.gridPrice} numberOfLines={1}>
+                          ₹{priceVal.toLocaleString('en-IN')}{' '}
+                          <Text style={styles.gridUnit}>/unit</Text>
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* View Full Store Redirect Banner */}
+              <TouchableOpacity
+                style={styles.openFullStoreBanner}
+                activeOpacity={0.8}
+                onPress={handleNavigateToStore}
+              >
+                <Text style={styles.openFullStoreText}>
+                  🏪 View All {myProducts.length} Products in Store Catalog ➔
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
 
-        {/* 4. Verified Shop Photos Media Gallery */}
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitleText}>🖼️ Verified Shop Photos & Gallery</Text>
-          <Text style={styles.sectionSubText}>Photos verified during onboarding inspection</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaRow}>
-            {Array.isArray((biz as any)?.media) && (biz as any).media.length > 0 ? (
-              (biz as any).media.map((m: any, idx: number) => (
-                <Image key={m.id || idx} source={{ uri: typeof m === 'string' ? m : m.url }} style={styles.mediaThumbImage} />
-              ))
-            ) : (
-              <Text style={{ color: '#64748b', fontSize: 12, paddingVertical: 8 }}>No shop photos uploaded yet.</Text>
-            )}
-          </ScrollView>
-        </View>
+        {/* 4. Verified Shop Photos Media Gallery (Hidden if no photos/videos uploaded) */}
+        {hasShopMedia && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitleText}>🖼️ Verified Shop Photos & Gallery</Text>
+            <Text style={styles.sectionSubText}>Photos verified during onboarding inspection</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaRow}>
+              {shopMediaItems.map((m: any, idx: number) => {
+                const mediaUrl = typeof m === 'string' ? m : m.url;
+                const isVideo =
+                  (typeof m === 'object' && (m.type === 'video' || m.isVideo)) ||
+                  mediaUrl.toLowerCase().endsWith('.mp4') ||
+                  mediaUrl.toLowerCase().endsWith('.mov') ||
+                  mediaUrl.toLowerCase().endsWith('.webm');
+
+                return (
+                  <View key={m.id || idx} style={styles.mediaThumbWrapper}>
+                    <Image
+                      source={{ uri: mediaUrl }}
+                      style={styles.mediaThumbImage}
+                      resizeMode="cover"
+                    />
+                    {isVideo && (
+                      <View style={styles.videoBadgeOverlay}>
+                        <Text style={styles.videoBadgeText}>▶ Video</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         {/* 5. Account & Legal Settings Controls */}
         <View style={styles.sectionCard}>
@@ -438,7 +544,11 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
           <TouchableOpacity
             style={styles.menuRow}
-            onPress={() => user?.mobileNumber ? Linking.openURL('tel:' + user.mobileNumber) : Alert.alert('Support Line', 'No support number registered.')}
+            onPress={() =>
+              user?.mobileNumber
+                ? Linking.openURL('tel:' + user.mobileNumber)
+                : Alert.alert('Support Line', 'No support number registered.')
+            }
           >
             <Text style={styles.menuIconText}>📞</Text>
             <View style={styles.menuMetaBox}>
@@ -448,14 +558,26 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.menuArrow}>➔</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuRow} onPress={() => setDeleteModalVisible(true)}>
-            <Text style={styles.menuIconText}>🗑️</Text>
-            <View style={styles.menuMetaBox}>
-              <Text style={styles.menuDangerText}>Request Account Deletion</Text>
-              <Text style={styles.menuSubText}>Compliance policy for Play Store & App Store</Text>
+          {user?.isDeletionRequested ? (
+            <View style={styles.deletionPendingBanner}>
+              <Text style={styles.deletionPendingIcon}>⚠️</Text>
+              <View style={styles.menuMetaBox}>
+                <Text style={styles.deletionPendingTitle}>Account Deletion Pending Review</Text>
+                <Text style={styles.menuSubText}>
+                  Reason: "{user?.deletionReason || 'Submitted by user'}" • Awaiting Super Admin review
+                </Text>
+              </View>
             </View>
-            <Text style={styles.menuArrow}>➔</Text>
-          </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.menuRow} onPress={() => setDeleteModalVisible(true)}>
+              <Text style={styles.menuIconText}>🗑️</Text>
+              <View style={styles.menuMetaBox}>
+                <Text style={styles.menuDangerText}>Request Account Deletion</Text>
+                <Text style={styles.menuSubText}>Compliance policy for Play Store & App Store</Text>
+              </View>
+              <Text style={styles.menuArrow}>➔</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
 
@@ -465,49 +587,94 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <ScrollView contentContainerStyle={styles.modalScroll}>
             <View style={styles.modalContent}>
               <Text style={styles.modalTitleBlue}>✏️ Edit Business Credentials</Text>
-              <Input label="Legal Owner Name *" placeholder="e.g. Dipen Patel" value={editFullName} onChangeText={setEditFullName} />
-              <Input label="Shop / Business Name *" placeholder="e.g. Royal Textiles" value={editShopName} onChangeText={setEditShopName} />
-              <Input label="Street Address" placeholder="e.g. GIDC Ring Road Market" value={editStreetAddress} onChangeText={setEditStreetAddress} />
-              
+              <Input
+                label="Legal Owner Name *"
+                placeholder="e.g. Dipen Patel"
+                value={editFullName}
+                onChangeText={setEditFullName}
+              />
+              <Input
+                label="Shop / Business Name *"
+                placeholder="e.g. Royal Textiles"
+                value={editShopName}
+                onChangeText={setEditShopName}
+              />
+              <Input
+                label="Street Address"
+                placeholder="e.g. GIDC Ring Road Market"
+                value={editStreetAddress}
+                onChangeText={setEditStreetAddress}
+              />
+
               <View style={styles.inputRowDouble}>
                 <View style={{ flex: 1 }}>
-                  <Input label="City" placeholder="e.g. Surat" value={editCity} onChangeText={setEditCity} />
+                  <Input
+                    label="City"
+                    placeholder="e.g. Surat"
+                    value={editCity}
+                    onChangeText={setEditCity}
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Input label="State" placeholder="e.g. Gujarat" value={editState} onChangeText={setEditState} />
+                  <Input
+                    label="State"
+                    placeholder="e.g. Gujarat"
+                    value={editState}
+                    onChangeText={setEditState}
+                  />
                 </View>
               </View>
 
-              <Input label="Pincode" placeholder="e.g. 395002" keyboardType="numeric" value={editPincode} onChangeText={setEditPincode} />
-              <Input label="GST Number (Leave blank if not filed)" placeholder="e.g. 24AAAAA0000A1Z5" value={editGstNumber} onChangeText={setEditGstNumber} />
-              <Input label="Wholesale Trade Terms / Policy" placeholder="e.g. Min Order ₹50,000 • 20% Advance" value={editTradeTerms} onChangeText={setEditTradeTerms} multiline numberOfLines={2} />
+              <Input
+                label="Pincode"
+                placeholder="e.g. 395002"
+                keyboardType="numeric"
+                value={editPincode}
+                onChangeText={setEditPincode}
+              />
+              <Input
+                label="GST Number (Leave blank if not filed)"
+                placeholder="e.g. 24AAAAA0000A1Z5"
+                value={editGstNumber}
+                onChangeText={setEditGstNumber}
+              />
+              <Input
+                label="Wholesale Trade Terms / Policy"
+                placeholder="e.g. Min Order ₹50,000 • 20% Advance"
+                value={editTradeTerms}
+                onChangeText={setEditTradeTerms}
+                multiline
+                numberOfLines={2}
+              />
 
               <View style={styles.modalActions}>
-                <Button title="Cancel" variant="secondary" onPress={() => setEditProfileModal(false)} style={{ flex: 1 }} />
-                <Button title="Save Credentials" loading={isSavingProfile} onPress={handleSaveProfile} style={{ flex: 1 }} />
+                <Button
+                  title="Cancel"
+                  variant="secondary"
+                  onPress={() => setEditProfileModal(false)}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Save Credentials"
+                  loading={isSavingProfile}
+                  onPress={handleSaveProfile}
+                  style={{ flex: 1 }}
+                />
               </View>
             </View>
           </ScrollView>
         </View>
       </Modal>
 
-      {/* Modal 2: Add Product to Catalog */}
-      <Modal visible={addProductModal} animationType="slide" transparent>
-        <View style={styles.modalBg}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitleBlue}>📦 Add New Catalog Item</Text>
-            <Input label="Product Title *" placeholder="e.g. 60s Combed Cotton Twill" value={prodTitle} onChangeText={setProdTitle} />
-            <Input label="Wholesale Price (₹/unit) *" placeholder="e.g. 185" keyboardType="numeric" value={prodPrice} onChangeText={setProdPrice} />
-            <Input label="MOQ (Units/Meters)" placeholder="e.g. 500" keyboardType="numeric" value={prodMOQ} onChangeText={setProdMOQ} />
-            <Input label="Image URL (Optional)" placeholder="https://..." value={prodImage} onChangeText={setProdImage} />
-
-            <View style={styles.modalActions}>
-              <Button title="Cancel" variant="secondary" onPress={() => setAddProductModal(false)} style={{ flex: 1 }} />
-              <Button title="Add Product" loading={isCreatingProduct} onPress={handleAddProduct} style={{ flex: 1 }} />
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* Modal 2: Universal Dynamic B2B Product Creation Modal (Identical to Store) */}
+      <ClothingProductCreateModal
+        isOpen={addProductModalOpen}
+        onClose={() => setAddProductModalOpen(false)}
+        onSuccess={() => {
+          refetchStore();
+          refetchProfile();
+        }}
+      />
 
       {/* Modal 3: Account Deletion Request */}
       <Modal visible={deleteModalVisible} animationType="slide" transparent>
@@ -515,7 +682,8 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitleDanger}>⚠️ Request Account Deletion</Text>
             <Text style={styles.modalSub}>
-              Submitting an account deletion request will remove your business catalog and store profile upon Super Admin approval.
+              Submitting an account deletion request will remove your business catalog and store
+              profile upon Super Admin approval.
             </Text>
 
             <Input
@@ -528,8 +696,19 @@ export const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             />
 
             <View style={styles.modalActions}>
-              <Button title="Cancel" variant="secondary" onPress={() => setDeleteModalVisible(false)} style={{ flex: 1 }} />
-              <Button title="Submit Request" variant="danger" loading={isSubmittingDelete} onPress={handleAccountDeletionRequest} style={{ flex: 1 }} />
+              <Button
+                title="Cancel"
+                variant="secondary"
+                onPress={() => setDeleteModalVisible(false)}
+                style={{ flex: 1 }}
+              />
+              <Button
+                title="Submit Request"
+                variant="danger"
+                loading={isSubmittingDelete}
+                onPress={handleAccountDeletionRequest}
+                style={{ flex: 1 }}
+              />
             </View>
           </View>
         </View>
@@ -624,6 +803,84 @@ const styles = StyleSheet.create({
   trustPillText: { color: '#4edea3', fontSize: 11, fontWeight: '800' },
   heroOwnerName: { color: '#ffffff', fontSize: 20, fontWeight: '900', textAlign: 'center' },
   heroShopName: { color: '#818cf8', fontSize: 14, fontWeight: '700', marginTop: 2, textAlign: 'center' },
+  // Responsive communities & location
+  communitiesWrapper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 12,
+  },
+  communityChip: {
+    backgroundColor: 'rgba(99, 102, 241, 0.15)',
+    borderColor: 'rgba(129, 140, 248, 0.35)',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  communityChipText: {
+    color: '#c7d2fe',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  locationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(51, 65, 85, 0.6)',
+  },
+  locationPillText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  mediaThumbWrapper: {
+    position: 'relative',
+    marginRight: 10,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  videoBadgeOverlay: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  videoBadgeText: {
+    color: '#38bdf8',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  deletionPendingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: 'rgba(244, 63, 94, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.35)',
+    borderRadius: 12,
+    marginTop: 4,
+  },
+  deletionPendingIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  deletionPendingTitle: {
+    color: '#fb7185',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   metaBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   metaText: { color: '#94a3b8', fontSize: 11, fontWeight: '600' },
   metaDot: { color: '#475569', fontSize: 12 },
@@ -673,7 +930,12 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
-  cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   cardHeaderTitleBox: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardHeaderIcon: { fontSize: 18 },
   cardHeaderTitle: { color: '#ffffff', fontSize: 16, fontWeight: '900' },
@@ -715,9 +977,11 @@ const styles = StyleSheet.create({
   boldWhite: { color: '#ffffff', fontWeight: '800' },
 
   // Catalog Section
-  catalogHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  catalogHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   countBadge: { backgroundColor: '#1e293b', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
   countBadgeText: { color: '#818cf8', fontSize: 11, fontWeight: '800' },
+  viewStoreLink: { paddingHorizontal: 4, paddingVertical: 2 },
+  viewStoreLinkText: { color: '#818cf8', fontSize: 11, fontWeight: '700' },
   addBtnSmall: { backgroundColor: '#4f46e5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   addBtnSmallText: { color: '#ffffff', fontSize: 11, fontWeight: '800' },
 
@@ -729,13 +993,12 @@ const styles = StyleSheet.create({
 
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   gridCard: {
-    width: GRID_COLUMN_WIDTH,
     backgroundColor: '#151b2d',
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#1e293b',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   gridImageWrapper: { width: '100%', height: GRID_COLUMN_WIDTH, backgroundColor: '#0f172a', position: 'relative' },
   gridImage: { width: '100%', height: '100%' },
@@ -753,6 +1016,23 @@ const styles = StyleSheet.create({
   gridSub: { color: '#64748b', fontSize: 9, marginTop: 2 },
   gridPrice: { color: '#818cf8', fontSize: 11, fontWeight: '900', marginTop: 4 },
   gridUnit: { color: '#64748b', fontSize: 8, fontWeight: '400' },
+
+  openFullStoreBanner: {
+    marginTop: 12,
+    backgroundColor: '#151b2d',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  openFullStoreText: {
+    color: '#818cf8',
+    fontSize: 12,
+    fontWeight: '800',
+  },
 
   // Media Gallery
   sectionTitleText: { color: '#818cf8', fontSize: 14, fontWeight: '900', marginBottom: 2 },
@@ -785,4 +1065,3 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   inputRowDouble: { flexDirection: 'row', gap: 10 },
 });
-

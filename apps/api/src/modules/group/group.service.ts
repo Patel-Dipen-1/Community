@@ -5,12 +5,34 @@ import { getUserCategoryProfile } from '../../utils/categoryAccess';
 let superAdminGlobalMaxCapacity = 40;
 
 export class GroupService {
-  static setGlobalGroupCapacity(capacity: number) {
+  static async setGlobalGroupCapacity(capacity: number) {
     superAdminGlobalMaxCapacity = capacity;
+    try {
+      await prisma.dynamicPlatformSetting.upsert({
+        where: { key: 'GROUP_GLOBAL_MAX_CAPACITY' },
+        update: { value: capacity, category: 'GROUPS' },
+        create: {
+          key: 'GROUP_GLOBAL_MAX_CAPACITY',
+          category: 'GROUPS',
+          value: capacity,
+          description: 'Global Default Group Capacity Setting',
+        },
+      });
+    } catch (e) {
+      console.warn('Failed to persist global group capacity setting:', e);
+    }
     return superAdminGlobalMaxCapacity;
   }
 
-  static getGlobalGroupCapacity() {
+  static async getGlobalGroupCapacity() {
+    try {
+      const setting = await prisma.dynamicPlatformSetting.findUnique({
+        where: { key: 'GROUP_GLOBAL_MAX_CAPACITY' },
+      });
+      if (setting && typeof setting.value === 'number') {
+        superAdminGlobalMaxCapacity = setting.value;
+      }
+    } catch {}
     return superAdminGlobalMaxCapacity;
   }
 
@@ -675,6 +697,40 @@ export class GroupService {
         data: { updatedAt: new Date() },
       });
 
+      // BUG-015: Trigger Background Push Notifications to Group Members
+      try {
+        const { PushNotificationService } = await import('../user/push.service');
+        const groupInfo = await prisma.group.findUnique({
+          where: { id: groupId },
+          select: { title: true },
+        });
+        const groupTitle = groupInfo?.title || 'Trade Broadcast Group';
+        const msgSnippet = newMessage.text || (newMessage.productCode ? `📦 Shared Product [${newMessage.productCode}]` : '📷 Media Attachment');
+
+        const otherMembers = await prisma.groupMember.findMany({
+          where: {
+            groupId,
+            userId: { not: senderId },
+          },
+          select: { userId: true },
+        });
+
+        for (const member of otherMembers) {
+          PushNotificationService.sendPushToUser(member.userId, {
+            title: `📢 ${groupTitle}`,
+            body: `${newMessage.sender?.fullName || senderName}: ${msgSnippet}`,
+            data: {
+              groupId,
+              groupTitle,
+              senderId,
+              type: 'GROUP_MESSAGE',
+            },
+          }).catch(() => {});
+        }
+      } catch (pushErr) {
+        console.warn('Failed to dispatch group push notifications:', pushErr);
+      }
+
       return {
         id: newMessage.id,
         groupId: newMessage.groupId,
@@ -866,6 +922,8 @@ export class GroupService {
       isFull: group.members.length >= group.maxCapacity,
       isMember: true,
       isViewerAdmin,
+      roleInGroup: viewer.roleInGroup,
+      createdById: group.createdById,
       members: memberList,
       messages: privacyFilteredMessages,
     };

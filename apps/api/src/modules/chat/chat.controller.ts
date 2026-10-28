@@ -88,11 +88,17 @@ export class ChatController {
 
       const message = await ChatService.sendMessage(senderId, conversationId, { text, productCode, mediaUrl, clientMessageId, replyToId });
       
-      // Broadcast live via Socket.io if available on req.app
+      // Broadcast live via Socket.io strictly to authorized participants
       const io = req.app.get('io');
       if (io) {
-        io.to(conversationId).emit('receive_message', message);
-        io.emit('message:new', message);
+        const recipientUserId = (message as any).recipientId;
+        // Chain .to() rooms in a single .emit() call so Socket.IO deduplicates across matching sockets
+        let broadcast = io.to(conversationId);
+        if (recipientUserId) {
+          broadcast = broadcast.to(`user:${recipientUserId}`);
+        }
+        broadcast = broadcast.to(`user:${senderId}`);
+        broadcast.emit('receive_message', message);
       }
 
       return res.status(201).json({ success: true, conversationId, message });
@@ -127,7 +133,7 @@ export class ChatController {
           if (msg.conversationId) {
             io.to(msg.conversationId).emit('receive_message', msg);
           } else if (msg.groupId) {
-            io.to(msg.groupId).emit('receive_group_message', msg);
+            io.to(`group_${msg.groupId}`).emit('receive_group_message', msg);
           }
         });
       }
@@ -236,9 +242,16 @@ export class ChatController {
         return res.status(400).json({ success: false, error: 'roomName (callId) is required' });
       }
 
-      const apiKey = process.env.LIVEKIT_API_KEY || 'devkey';
-      const apiSecret = process.env.LIVEKIT_API_SECRET || 'secret1234567890supersecretkey64chars';
-      const livekitUrl = process.env.LIVEKIT_URL || process.env.NEXT_PUBLIC_LIVEKIT_URL || 'wss://rtc.yourdomain.com';
+      const apiKey = process.env.LIVEKIT_API_KEY;
+      const apiSecret = process.env.LIVEKIT_API_SECRET;
+      const livekitUrl = process.env.LIVEKIT_URL || process.env.NEXT_PUBLIC_LIVEKIT_URL;
+
+      if (!apiKey || !apiSecret || !livekitUrl) {
+        return res.status(503).json({
+          success: false,
+          error: 'LIVEKIT_NOT_CONFIGURED: LiveKit RTC credentials are not configured on server',
+        });
+      }
 
       const { AccessToken } = await import('livekit-server-sdk');
 

@@ -117,8 +117,10 @@ export class PushNotificationService {
 
     const tokenStrings = tokens.map((t) => t.token);
 
-    // Expo Push Service dispatch for ExponentPushToken & ExpoPushToken
+    // BUG-047: Partition Expo tokens from native FCM tokens to prevent duplicate deliveries
     const expoTokens = tokenStrings.filter((t) => t.includes('ExponentPushToken') || t.includes('ExpoPushToken'));
+    const fcmTokens = tokenStrings.filter((t) => !t.includes('ExponentPushToken') && !t.includes('ExpoPushToken'));
+
     let expoSentCount = 0;
     if (expoTokens.length > 0) {
       try {
@@ -150,11 +152,13 @@ export class PushNotificationService {
       }
     }
 
-    // Primary: Send via Firebase Admin SDK
-    if (getApps().length > 0) {
+    // Primary: Send non-Expo tokens via official Firebase Admin SDK (HTTP v1)
+    let fcmSuccessCount = 0;
+    let fcmFailureCount = 0;
+    if (fcmTokens.length > 0 && getApps().length > 0) {
       try {
         const response = await getMessaging().sendEachForMulticast({
-          tokens: tokenStrings,
+          tokens: fcmTokens,
           notification: {
             title: notification.title,
             body: notification.body,
@@ -162,42 +166,20 @@ export class PushNotificationService {
           data: notification.data || {},
         });
 
-        return { sent: response.successCount + expoSentCount, totalTokens: tokens.length, failures: response.failureCount };
+        fcmSuccessCount = response.successCount;
+        fcmFailureCount = response.failureCount;
       } catch (err: any) {
         console.error('FCM Multicast delivery error:', err);
       }
+    } else if (fcmTokens.length > 0 && getApps().length === 0) {
+      // BUG-044: Notice that Google deprecated & shut down Legacy HTTP API (fcm.googleapis.com/fcm/send)
+      console.warn('Firebase Admin SDK is not initialized; FCM native tokens cannot be delivered without active Firebase configuration.');
     }
 
-    // Fallback Legacy HTTP send if server key provided in DB
-    if (config.fcmServerKey && config.fcmServerKey !== 'FIREBASE_SERVICE_ACCOUNT_ACTIVE') {
-      let successCount = 0;
-      for (const t of tokens) {
-        try {
-          const response = await fetch('https://fcm.googleapis.com/fcm/send', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `key=${config.fcmServerKey}`,
-            },
-            body: JSON.stringify({
-              to: t.token,
-              notification: {
-                title: notification.title,
-                body: notification.body,
-              },
-              data: notification.data || {},
-              priority: 'high',
-            }),
-          });
-
-          if (response.ok) successCount++;
-        } catch {
-          // Ignore individual token failure
-        }
-      }
-      return { sent: successCount + expoSentCount, totalTokens: tokens.length };
-    }
-
-    return { sent: expoSentCount, totalTokens: tokens.length };
+    return {
+      sent: expoSentCount + fcmSuccessCount,
+      totalTokens: tokens.length,
+      failures: fcmFailureCount,
+    };
   }
 }

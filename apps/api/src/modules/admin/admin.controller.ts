@@ -113,6 +113,16 @@ export class AdminController {
     }
   }
 
+  static async rejectDeletionRequest(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      const result = await AdminService.rejectDeletionRequest(userId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+
   static async deleteAccount(req: Request, res: Response) {
     try {
       const { userId } = req.params;

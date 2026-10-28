@@ -1,19 +1,23 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { isRunningInExpoGo } from 'expo';
 import { ENV_CONFIG } from '../../constants/config';
 import { authStorage } from '../storage/authStorage';
-
 import Constants from 'expo-constants';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+} catch (e) {
+  console.warn('[PushNotificationService] Failed to set notification handler:', e);
+}
 
 export class PushNotificationService {
   /**
@@ -21,6 +25,23 @@ export class PushNotificationService {
    */
   static async registerForPushNotifications(): Promise<string | null> {
     try {
+      // In Expo Go on Android (SDK 53+), remote push notifications were removed by Expo.
+      // Remote notifications work in development builds (npx expo run:android) or standalone APK builds.
+      if (isRunningInExpoGo() && Platform.OS === 'android') {
+        
+        if (Platform.OS === 'android') {
+          try {
+            await Notifications.setNotificationChannelAsync('default', {
+              name: 'Default Business Notifications',
+              importance: Notifications.AndroidImportance.MAX,
+              vibrationPattern: [0, 250, 250, 250],
+              lightColor: '#818cf8',
+            });
+          } catch {}
+        }
+        return null;
+      }
+
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
 
@@ -56,12 +77,12 @@ export class PushNotificationService {
       }
 
       if (Platform.OS === 'android') {
-        Notifications.setNotificationChannelAsync('default', {
+        await Notifications.setNotificationChannelAsync('default', {
           name: 'Default Business Notifications',
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
           lightColor: '#818cf8',
-        });
+        }).catch(() => {});
       }
 
       return token;
@@ -75,7 +96,12 @@ export class PushNotificationService {
    * Add listener for notification tap / deep link
    */
   static addNotificationTapListener(onTap: (notification: Notifications.NotificationResponse) => void) {
-    return Notifications.addNotificationResponseReceivedListener(onTap);
+    try {
+      return Notifications.addNotificationResponseReceivedListener(onTap);
+    } catch (err) {
+      console.warn('Could not add notification response listener:', err);
+      return { remove: () => {} };
+    }
   }
 
   /**

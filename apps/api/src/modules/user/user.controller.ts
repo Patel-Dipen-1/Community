@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { RegisterUserSchema, LoginUserSchema, RequestAccountDeletionSchema } from './user.validation';
 import { UserService } from './user.service';
+import { isSuperAdminEmail } from '../../utils/superAdmin';
 
 export class UserController {
   static async getProfile(req: Request, res: Response) {
@@ -56,7 +57,13 @@ export class UserController {
           status: result.user.status,
           isVerified: result.user.isVerified,
           allowedCommunities: result.allowedCommunities,
-          role: result.user.business?.assignedRole || (result.user.email === 'dnpatel2002@gmail.com' ? 'SUPER_ADMIN' : 'RETAILER'),
+          role: result.user.business?.assignedRole || (isSuperAdminEmail(result.user.email) ? 'SUPER_ADMIN' : 'RETAILER'),
+          business: result.user.business
+            ? {
+                ...result.user.business,
+                allowedCommunities: result.allowedCommunities,
+              }
+            : null,
         },
       });
     } catch (error: any) {

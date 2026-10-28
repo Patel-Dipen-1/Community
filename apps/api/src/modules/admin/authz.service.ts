@@ -1,4 +1,5 @@
 import { prisma } from '@b2b/database';
+import { isSuperAdminUser } from '../../utils/superAdmin';
 
 export interface AuthorizationCheckResult {
   allowed: boolean;
@@ -86,9 +87,7 @@ export class AuthorizationService {
       }
 
       // SUPER_ADMIN role bypasses standard feature/role permission restrictions
-      const isSuperAdmin =
-        user.email === 'dnpatel2002@gmail.com' ||
-        user.business?.assignedRole === 'SUPER_ADMIN';
+      const isSuperAdmin = isSuperAdminUser(user);
 
       if (isSuperAdmin) {
         return { allowed: true };

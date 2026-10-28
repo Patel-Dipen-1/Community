@@ -489,19 +489,12 @@ export default function GroupModule() {
 
     try {
       if (attachedMediaList.length > 0) {
-        const firstMedia = attachedMediaList[0];
+        const combinedUrls = attachedMediaList.map((m) => m.url).join(',');
         await sendGroupMessage({
           groupId: selectedGroupId,
-          text: messageText.trim() || undefined,
-          mediaUrl: firstMedia.url,
+          text: messageText.trim() || (attachedMediaList.length > 1 ? `🖼️ Shared Album (${attachedMediaList.length} Photos)` : undefined),
+          mediaUrl: combinedUrls,
         }).unwrap();
-
-        for (let i = 1; i < attachedMediaList.length; i++) {
-          await sendGroupMessage({
-            groupId: selectedGroupId,
-            mediaUrl: attachedMediaList[i].url,
-          }).unwrap();
-        }
 
         setMessageText('');
         setAttachedMediaList([]);

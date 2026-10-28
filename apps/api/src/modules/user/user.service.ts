@@ -1,8 +1,9 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '@b2b/database';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'b2b-secure-jwt-secret-key-2026';
+import { JWT_SECRET } from '../../config/jwt';
+import { isSuperAdminEmail } from '../../utils/superAdmin';
 
 export class UserService {
   // Fetch full profile for currently authenticated user
@@ -41,7 +42,7 @@ export class UserService {
             pincode: user.business.pincode,
             tradeTerms: user.business.tradeTerms || null,
             verificationTag: user.business.verificationTag,
-            assignedRole: user.business.assignedRole || (user.email === 'dnpatel2002@gmail.com' ? 'SUPER_ADMIN' : 'RETAILER'),
+            assignedRole: user.business.assignedRole || (isSuperAdminEmail(user.email) ? 'SUPER_ADMIN' : 'RETAILER'),
             allowedCommunities: user.business.allowedCommunities || ['clothing'],
             media: user.business.media || [],
           }
@@ -230,7 +231,8 @@ export class UserService {
     }
 
     if (!user.passwordHash) throw new Error('Invalid credentials');
-    const isMatch = (await bcrypt.compare(cleanPassword, user.passwordHash)) || (await bcrypt.compare(password, user.passwordHash));
+    // BUG-045: Single constant-time password check preventing double hashing DoS
+    const isMatch = await bcrypt.compare(cleanPassword, user.passwordHash);
     if (!isMatch) throw new Error('Invalid credentials');
 
     // 5-Session Limit Enforcement: Auto-evict oldest active session if 5 sessions reached
@@ -279,9 +281,11 @@ export class UserService {
       { expiresIn: '7d' }
     );
 
+    // BUG-042: Hash session token with SHA-256 before database storage to prevent token theft on DB exposure
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
     await prisma.session.update({
       where: { id: session.id },
-      data: { token },
+      data: { token: hashedToken },
     });
 
     return { user, token, allowedCommunities, sessionWarning };

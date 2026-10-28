@@ -24,8 +24,41 @@ import storeRoutes from './modules/store/store.routes';
 
 import Redis from 'ioredis';
 import { createAdapter } from '@socket.io/redis-adapter';
+import jwt from 'jsonwebtoken';
+import { ChatService } from './modules/chat/chat.service';
+import { GroupService } from './modules/group/group.service';
+
+import { JWT_SECRET } from './config/jwt';
+import { isSuperAdminUser, isSuperAdminEmail } from './utils/superAdmin';
+import { authenticateToken, requireSuperAdmin } from './middleware/auth.middleware';
 
 dotenv.config();
+
+// BUG-036: Strict CORS Whitelist Configuration
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : [
+      'http://localhost:3000',
+      'http://localhost:5000',
+      'http://localhost:8081',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:8081',
+      'exp://localhost:8081',
+    ];
+
+const corsOriginChecker = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  // Mobile applications, curl, and server-to-server requests send no Origin header
+  if (!origin) return callback(null, true);
+  if (
+    allowedOrigins.includes(origin) ||
+    origin.startsWith('http://localhost:') ||
+    origin.startsWith('http://127.0.0.1:') ||
+    origin.startsWith('exp://')
+  ) {
+    return callback(null, true);
+  }
+  return callback(new Error(`CORS blocked for origin: ${origin}`));
+};
 
 const app = express();
 const server = http.createServer(app);
@@ -40,9 +73,13 @@ server.requestTimeout = 30000;   // 30 seconds
 
 // Phase 6: Socket.IO Optimization Configuration
 const io = new SocketIOServer(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: {
+    origin: corsOriginChecker,
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
   maxHttpBufferSize: 1e6, // 1 MB limit per event payload to prevent buffer floods
-  pingTimeout: 20000,     // 20s heartbeat timeout
+  pingTimeout: 60000,     // 60s heartbeat timeout (must be > pingInterval to prevent phantom disconnects)
   pingInterval: 25000,    // 25s ping interval
   transports: ['websocket', 'polling'],
 });
@@ -88,18 +125,30 @@ const PORT = process.env.PORT || 5000;
 // 1. Production Security & Optimization Middlewares
 app.use(helmet({ crossOriginResourcePolicy: false })); // Security Headers
 app.use(compression());
-app.use(cors());
+app.use(
+  cors({
+    origin: corsOriginChecker,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Cache-Control'],
+  })
+);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(globalRateLimiter);
 
 // Serve Static Uploaded Images, Audios & Videos from Local Disk (`apps/api/uploads/`)
+// BUG-040: Secure headers preventing hotlinking & MIME sniffing
 app.use(
   '/uploads',
   express.static(path.join(__dirname, '../uploads'), {
     setHeaders: (res, filePath) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Accept-Ranges', 'bytes');
+      const reqOrigin = res.req?.headers?.origin;
+      if (typeof reqOrigin === 'string' && (allowedOrigins.includes(reqOrigin) || reqOrigin.startsWith('http://localhost:') || reqOrigin.startsWith('http://127.0.0.1:'))) {
+        res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+      }
       if (filePath.endsWith('.webm')) {
         res.setHeader('Content-Type', 'audio/webm');
       } else if (filePath.endsWith('.mp4') || filePath.endsWith('.m4a')) {
@@ -127,7 +176,7 @@ app.use('/api/v1/products', cacheResponse(30), verifySubscriptionAccess, product
 app.use('/api/v1/store', cacheResponse(30), verifySubscriptionAccess, storeRoutes);
 app.use('/api/v1/leads', verifySubscriptionAccess, leadRoutes);
 app.use('/api/v1/status', verifySubscriptionAccess, statusRoutes);
-app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/admin', authenticateToken as any, requireSuperAdmin as any, adminRoutes);
 app.use('/api/v1/groups', verifySubscriptionAccess, groupRoutes);
 app.use('/api/v1/upload', uploadRoutes);
 app.use('/api/v1/chat', verifySubscriptionAccess, chatRoutes);
@@ -139,10 +188,21 @@ app.use('/api/v1/likes', verifySubscriptionAccess, likeRoutes);
 // Health & Database Connectivity Check Endpoint
 app.get('/api/v1/health', async (req, res) => {
   const memoryUsage = process.memoryUsage();
-  res.json({
-    status: 'OK',
+  let dbStatus = 'CONNECTED';
+  try {
+    // BUG-046: Safe parameterized query literal preventing dynamic SQL injection
+    await prisma.$queryRaw`SELECT 1`;
+  } catch (err: any) {
+    dbStatus = 'DISCONNECTED';
+  }
+
+  const isHealthy = dbStatus === 'CONNECTED';
+  const statusCode = isHealthy ? 200 : 503;
+
+  res.status(statusCode).json({
+    status: isHealthy ? 'OK' : 'DEGRADED',
     system: 'Multi-Community B2B Platform API Engine',
-    database: 'CONNECTED',
+    database: dbStatus,
     redis: redisStatus,
     vpsOptimization: {
       eventLoopThread: 'FREE / UNBLOCKED',
@@ -158,46 +218,157 @@ app.get('/api/v1/health', async (req, res) => {
 const userSocketsMap = new Map<string, Set<string>>();
 const activeCallsMap = new Map<string, any>();
 
+// Socket.IO Handshake Authentication Middleware
+io.use((socket, next) => {
+  try {
+    const authHeader = socket.handshake.headers?.authorization;
+    const headerToken = authHeader
+      ? authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : authHeader
+      : null;
+    const token =
+      socket.handshake.auth?.token ||
+      headerToken ||
+      (socket.handshake.query?.token as string);
+
+    if (!token || typeof token !== 'string') {
+      return next(new Error('UNAUTHORIZED: Authentication token required'));
+    }
+
+    jwt.verify(token, JWT_SECRET, async (err: any, decoded: any) => {
+      if (err || !decoded) {
+        return next(new Error('UNAUTHORIZED: Invalid or expired authentication token'));
+      }
+
+      const verifiedUserId = decoded.userId || decoded.id;
+      if (!verifiedUserId) {
+        return next(new Error('UNAUTHORIZED: Token missing user identifier'));
+      }
+
+      // BUG-043: Active session validation in Socket.IO auth
+      if (decoded.sessionId) {
+        try {
+          const session = await prisma.session.findUnique({
+            where: { id: decoded.sessionId },
+            select: { status: true },
+          });
+          if (!session || session.status !== 'ACTIVE') {
+            return next(new Error('SESSION_REVOKED: This session has been terminated or revoked'));
+          }
+        } catch {}
+      }
+
+      // Bind cryptographically verified identity strictly from JWT
+      socket.data.userId = verifiedUserId;
+      socket.data.user = decoded;
+      next();
+    });
+  } catch (err: any) {
+    return next(new Error(`UNAUTHORIZED: ${err.message}`));
+  }
+});
+
+// Helper to broadcast presence updates only to relevant conversation peers (BUG-024)
+const broadcastPresenceChange = async (targetUserId: string, status: 'ONLINE' | 'OFFLINE', lastSeen: string | null) => {
+  try {
+    const userConvs = await prisma.conversation.findMany({
+      where: { OR: [{ user1Id: targetUserId }, { user2Id: targetUserId }] },
+      select: { user1Id: true, user2Id: true },
+    });
+    const recipientRooms = new Set<string>();
+    recipientRooms.add(`user:${targetUserId}`);
+    for (const c of userConvs) {
+      const peerId = c.user1Id === targetUserId ? c.user2Id : c.user1Id;
+      if (peerId) recipientRooms.add(`user:${peerId}`);
+    }
+    const payload = { userId: targetUserId, status, lastSeen };
+    for (const room of recipientRooms) {
+      io.to(room).emit('user_presence_change', payload);
+    }
+  } catch (err: any) {
+    logger.error(`Presence broadcast error: ${err.message}`);
+  }
+};
+
 // Real-Time Socket.io Server for Chat, Trade Groups, Presence & WebRTC Calling
 io.on('connection', (socket) => {
+  const userId = socket.data.userId;
+  if (!userId) {
+    socket.disconnect(true);
+    return;
+  }
+
+  // Automatically join authenticated user room for targeted calls & notifications
+  socket.join(`user:${userId}`);
+
   // Register User Presence (Handles multi-device/multi-tab correctly)
-  socket.on('register_user', (userId: string) => {
-    if (userId) {
-      socket.data.userId = userId;
-      socket.join(`user:${userId}`); // Join user room for targeted calls & notifications
+  let sockets = userSocketsMap.get(userId);
+  if (!sockets) {
+    sockets = new Set<string>();
+    userSocketsMap.set(userId, sockets);
+  }
+  const isFirstSocket = sockets.size === 0;
+  sockets.add(socket.id);
 
-      let sockets = userSocketsMap.get(userId);
-      if (!sockets) {
-        sockets = new Set<string>();
-        userSocketsMap.set(userId, sockets);
-      }
-      const isFirstSocket = sockets.size === 0;
-      sockets.add(socket.id);
+  if (redisClient) {
+    redisClient.sadd(`presence:sockets:${userId}`, socket.id).catch(() => {});
+    redisClient.set(`presence:user:${userId}`, 'ONLINE', 'EX', 300).catch(() => {});
+  }
 
-      if (redisClient) {
-        redisClient.sadd(`presence:sockets:${userId}`, socket.id).catch(() => {});
-        redisClient.set(`presence:user:${userId}`, 'ONLINE', 'EX', 300).catch(() => {});
-      }
+  if (isFirstSocket) {
+    // Record active session time
+    prisma.session.updateMany({
+      where: { userId, status: 'ACTIVE' },
+      data: { lastActive: new Date() },
+    }).catch(() => {});
+    broadcastPresenceChange(userId, 'ONLINE', null);
+  }
 
-      if (isFirstSocket) {
-        io.emit('user_presence_change', { userId, status: 'ONLINE', lastSeen: null });
-      }
+  // Backward-compatible register_user handler (enforces verified identity, prevents spoofing)
+  socket.on('register_user', (clientUserId: string) => {
+    if (clientUserId && clientUserId !== userId) {
+      logger.warn(`Security Alert: Socket ${socket.id} (authenticated as ${userId}) attempted to register as ${clientUserId}. Spoofing rejected.`);
+      return;
     }
   });
 
-  // Fetch Presence & Last Seen for a target user
+  // Fetch Presence & Last Seen for a target user (cross-cluster compatible via Redis)
+  // BUG-023: Use actual Session.lastActive or Redis presence timestamp instead of user.updatedAt
   socket.on('get_user_presence', async (targetUserId: string) => {
     if (!targetUserId) return;
-    const isOnline = (userSocketsMap.get(targetUserId)?.size || 0) > 0;
+    let isOnline = (userSocketsMap.get(targetUserId)?.size || 0) > 0;
+    if (!isOnline && redisClient) {
+      try {
+        const count = await redisClient.scard(`presence:sockets:${targetUserId}`);
+        isOnline = count > 0;
+      } catch {}
+    }
+
     try {
-      const targetUser = await prisma.user.findUnique({
-        where: { id: targetUserId },
-        select: { updatedAt: true },
-      });
+      let lastSeenDate: Date | null = null;
+      if (redisClient) {
+        try {
+          const cached = await redisClient.get(`presence:last_seen:${targetUserId}`);
+          if (cached) lastSeenDate = new Date(cached);
+        } catch {}
+      }
+
+      if (!lastSeenDate) {
+        const latestSession = await prisma.session.findFirst({
+          where: { userId: targetUserId },
+          orderBy: { lastActive: 'desc' },
+          select: { lastActive: true },
+        });
+        if (latestSession?.lastActive) {
+          lastSeenDate = latestSession.lastActive;
+        }
+      }
+
       socket.emit('user_presence_status', {
         userId: targetUserId,
         status: isOnline ? 'ONLINE' : 'OFFLINE',
-        lastSeen: targetUser?.updatedAt?.toISOString() || null,
+        lastSeen: lastSeenDate ? lastSeenDate.toISOString() : null,
       });
     } catch {
       socket.emit('user_presence_status', {
@@ -266,10 +437,8 @@ io.on('connection', (socket) => {
           ? target.business.allowedCommunities
           : ['clothing'];
 
-      const isCallerAdmin =
-        caller.email === 'dnpatel2002@gmail.com' || caller.business?.assignedRole === 'SUPER_ADMIN';
-      const isTargetAdmin =
-        target.email === 'dnpatel2002@gmail.com' || target.business?.assignedRole === 'SUPER_ADMIN';
+      const isCallerAdmin = isSuperAdminUser(caller);
+      const isTargetAdmin = isSuperAdminUser(target);
       const hasSharedCommunity = isCallerAdmin || isTargetAdmin || callerComms.some((c) => targetComms.includes(c));
 
       if (!hasSharedCommunity) {
@@ -319,39 +488,77 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('call:accept', (data: { callId: string; callerUserId: string }) => {
+  socket.on('call:accept', (data: { callId?: string; callerUserId?: string; targetUserId?: string }) => {
     const receiverUserId = socket.data.userId;
     if (!receiverUserId) return;
 
-    const session = activeCallsMap.get(data.callId);
+    let session: any = null;
+    let callId = data?.callId;
+
+    if (callId) {
+      session = activeCallsMap.get(callId);
+    } else {
+      const callerId = data?.callerUserId || data?.targetUserId;
+      for (const [id, s] of activeCallsMap.entries()) {
+        if (s.targetUserId === receiverUserId && (!callerId || s.callerUserId === callerId)) {
+          session = s;
+          callId = id;
+          break;
+        }
+      }
+    }
+
     if (session && session.status === 'RINGING') {
       session.status = 'CONNECTED';
-      io.to(`user:${data.callerUserId}`).emit('call:accepted', {
-        callId: data.callId,
+      const targetCallerId = session.callerUserId;
+      const resolvedCallId = callId || session.callId;
+      io.to(`user:${targetCallerId}`).emit('call:accepted', {
+        callId: resolvedCallId,
         receiverUserId,
       });
       // Dismiss incoming ringing on receiver's other active tabs
       io.to(`user:${receiverUserId}`).emit('call:handled', {
-        callId: data.callId,
+        callId: resolvedCallId,
         action: 'accepted',
       });
     }
   });
 
-  socket.on('call:reject', (data: { callId: string; callerUserId: string }) => {
+  socket.on('call:reject', (data: { callId?: string; callerUserId?: string; targetUserId?: string }) => {
     const receiverUserId = socket.data.userId;
     if (!receiverUserId) return;
 
-    activeCallsMap.delete(data.callId);
-    io.to(`user:${data.callerUserId}`).emit('call:rejected', {
-      callId: data.callId,
-      receiverUserId,
-    });
-    // Dismiss incoming ringing on receiver's other active tabs
-    io.to(`user:${receiverUserId}`).emit('call:handled', {
-      callId: data.callId,
-      action: 'rejected',
-    });
+    let session: any = null;
+    let callId = data?.callId;
+
+    if (callId) {
+      session = activeCallsMap.get(callId);
+    } else {
+      const callerId = data?.callerUserId || data?.targetUserId;
+      for (const [id, s] of activeCallsMap.entries()) {
+        if (s.targetUserId === receiverUserId && (!callerId || s.callerUserId === callerId)) {
+          session = s;
+          callId = id;
+          break;
+        }
+      }
+    }
+
+    if (session) {
+      const resolvedCallId = callId || session.callId;
+      if (resolvedCallId) {
+        activeCallsMap.delete(resolvedCallId);
+      }
+      io.to(`user:${session.callerUserId}`).emit('call:rejected', {
+        callId: resolvedCallId,
+        receiverUserId,
+      });
+      // Dismiss incoming ringing on receiver's other active tabs
+      io.to(`user:${receiverUserId}`).emit('call:handled', {
+        callId: resolvedCallId,
+        action: 'rejected',
+      });
+    }
   });
 
   socket.on('call:cancel', (data: { callId: string; targetUserId: string }) => {
@@ -484,87 +691,154 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Broadcast 1-to-1 Message (With Authorization Check)
-  socket.on('send_message', async (data: { conversationId: string; senderId?: string; text?: string; productCode?: string; mediaUrl?: string; clientMessageId?: string }) => {
+  // Leave 1-to-1 Chat Room (BUG-028)
+  socket.on('leave_conversation', (conversationId: string) => {
+    if (conversationId) {
+      socket.leave(conversationId);
+    }
+  });
+
+  // Leave Trade Group Room (BUG-029)
+  socket.on('leave_group', (groupId: string) => {
+    if (groupId) {
+      socket.leave(`group_${groupId}`);
+    }
+  });
+
+  // 1-to-1 Direct Message with Durable Database Persistence & Idempotency
+  socket.on(
+    'send_message',
+    async (
+      data: {
+        conversationId: string;
+        text?: string;
+        productCode?: string;
+        mediaUrl?: string;
+        clientMessageId?: string;
+        replyToId?: string;
+        senderId?: string;
+      },
+      callback?: (res: { success: boolean; message?: any; error?: string }) => void
+    ) => {
+      const socketUserId = socket.data.userId;
+      if (!socketUserId) {
+        const err = { message: 'UNAUTHORIZED_SENDER: Socket user identity mismatch' };
+        socket.emit('error', err);
+        callback?.({ success: false, error: err.message });
+        return;
+      }
+
+      if (!data?.conversationId) {
+        const err = { message: 'INVALID_REQUEST: conversationId is required' };
+        socket.emit('error', err);
+        callback?.({ success: false, error: err.message });
+        return;
+      }
+
+      try {
+        // Durably persist in PostgreSQL before emitting or acknowledging
+        const message = await ChatService.sendMessage(socketUserId, data.conversationId, {
+          text: data.text,
+          productCode: data.productCode,
+          mediaUrl: data.mediaUrl,
+          clientMessageId: data.clientMessageId,
+          replyToId: data.replyToId,
+        });
+
+        // Broadcast to conversation room and recipient's user room (excluding sender socket, which gets callback)
+        const recipientUserId = (message as any).recipientId;
+        let broadcast = socket.to(data.conversationId);
+        if (recipientUserId) {
+          broadcast = broadcast.to(`user:${recipientUserId}`);
+        }
+        broadcast.emit('receive_message', message);
+
+        callback?.({ success: true, message });
+      } catch (err: any) {
+        logger.error(`Error sending message via socket: ${err.message}`);
+        socket.emit('error', { message: err.message || 'Failed to send message' });
+        callback?.({ success: false, error: err.message || 'Failed to send message' });
+      }
+    }
+  );
+
+  // Group Message with Durable Database Persistence, Membership Verification & Idempotency
+  socket.on(
+    'send_group_message',
+    async (
+      data: {
+        groupId: string;
+        text?: string;
+        productCode?: string;
+        mediaUrl?: string;
+        clientMessageId?: string;
+        replyToId?: string;
+        senderId?: string;
+      },
+      callback?: (res: { success: boolean; message?: any; error?: string }) => void
+    ) => {
+      const socketUserId = socket.data.userId;
+      if (!socketUserId) {
+        const err = { message: 'UNAUTHORIZED_SENDER: Socket user identity mismatch' };
+        socket.emit('error', err);
+        callback?.({ success: false, error: err.message });
+        return;
+      }
+
+      if (!data?.groupId) {
+        const err = { message: 'INVALID_REQUEST: groupId is required' };
+        socket.emit('error', err);
+        callback?.({ success: false, error: err.message });
+        return;
+      }
+
+      try {
+        // Durably persist in PostgreSQL before emitting or acknowledging
+        const message = await GroupService.sendMessage(data.groupId, socketUserId, {
+          text: data.text,
+          productCode: data.productCode,
+          mediaUrl: data.mediaUrl,
+          clientMessageId: data.clientMessageId,
+          replyToId: data.replyToId,
+        });
+
+        io.to(`group_${data.groupId}`).emit('receive_group_message', message);
+        callback?.({ success: true, message });
+      } catch (err: any) {
+        logger.error(`Error sending group message via socket: ${err.message}`);
+        socket.emit('error', { message: err.message || 'Failed to send group message' });
+        callback?.({ success: false, error: err.message || 'Failed to send group message' });
+      }
+    }
+  );
+
+  // Edit Direct Message with DB Persistence and Ownership Verification
+  socket.on('edit_message', async (data: { conversationId: string; messageId: string; text: string }) => {
     const socketUserId = socket.data.userId;
-    if (!socketUserId) {
-      socket.emit('error', { message: 'UNAUTHORIZED_SENDER: Socket user identity mismatch' });
-      return;
+    if (!socketUserId || !data?.messageId || !data?.text?.trim()) return;
+
+    try {
+      const updated = await ChatService.editMessage(socketUserId, data.messageId, data.text.trim());
+      if (updated?.conversationId) {
+        io.to(updated.conversationId).emit('message_edited', updated);
+      }
+    } catch (err: any) {
+      socket.emit('error', { message: err.message || 'Failed to edit message' });
     }
-
-    const senderId = data.senderId || socketUserId;
-    if (senderId !== socketUserId) {
-      socket.emit('error', { message: 'UNAUTHORIZED_SENDER: Socket user identity mismatch' });
-      return;
-    }
-
-    const conversation = await prisma.conversation.findUnique({
-      where: { id: data.conversationId },
-      select: { user1Id: true, user2Id: true },
-    });
-
-    if (!conversation || (conversation.user1Id !== socketUserId && conversation.user2Id !== socketUserId)) {
-      socket.emit('error', { message: 'UNAUTHORIZED_CONVERSATION' });
-      return;
-    }
-
-    setImmediate(() => {
-      io.to(data.conversationId).emit('receive_message', {
-        id: `msg-${Date.now()}`,
-        conversationId: data.conversationId,
-        senderId,
-        clientMessageId: data.clientMessageId,
-        text: data.text,
-        productCode: data.productCode,
-        mediaUrl: data.mediaUrl,
-        createdAt: new Date(),
-      });
-    });
   });
 
-  // Broadcast Group Message (With Membership Verification)
-  socket.on('send_group_message', async (data: { groupId: string; senderId: string; senderName?: string; text?: string; productCode?: string; mediaUrl?: string; clientMessageId?: string }) => {
+  // Edit Group Message with DB Persistence and Ownership Verification
+  socket.on('edit_group_message', async (data: { groupId: string; messageId: string; text: string }) => {
     const socketUserId = socket.data.userId;
-    if (!socketUserId || socketUserId !== data.senderId) {
-      socket.emit('error', { message: 'UNAUTHORIZED_SENDER: Socket user identity mismatch' });
-      return;
-    }
+    if (!socketUserId || !data?.messageId || !data?.text?.trim()) return;
 
-    const membership = await prisma.groupMember.findFirst({
-      where: { groupId: data.groupId, userId: socketUserId },
-    });
-
-    if (!membership) {
-      socket.emit('error', { message: 'UNAUTHORIZED_GROUP_MEMBER' });
-      return;
-    }
-
-    setImmediate(() => {
-      io.to(`group_${data.groupId}`).emit('receive_group_message', {
-        id: `gmsg-${Date.now()}`,
-        groupId: data.groupId,
-        senderId: data.senderId,
-        senderName: data.senderName || 'Member',
-        clientMessageId: data.clientMessageId,
-        text: data.text,
-        productCode: data.productCode,
-        mediaUrl: data.mediaUrl,
-        createdAt: new Date(),
-      });
-    });
-  });
-
-  // Edit Direct Message Socket Event Relay
-  socket.on('edit_message', (data: { conversationId: string; messageId: string; text: string }) => {
-    if (data?.conversationId) {
-      io.to(data.conversationId).emit('message_edited', data);
-    }
-  });
-
-  // Edit Group Message Socket Event Relay
-  socket.on('edit_group_message', (data: { groupId: string; messageId: string; text: string }) => {
-    if (data?.groupId) {
-      io.to(`group_${data.groupId}`).emit('group_message_edited', data);
+    try {
+      const updated = await GroupService.editGroupMessage(socketUserId, data.messageId, data.text.trim());
+      if (updated?.groupId) {
+        io.to(`group_${updated.groupId}`).emit('group_message_edited', updated);
+      }
+    } catch (err: any) {
+      socket.emit('error', { message: err.message || 'Failed to edit group message' });
     }
   });
 
@@ -574,7 +848,16 @@ io.on('connection', (socket) => {
     if (!userId || !data?.conversationId) return;
 
     try {
-      await prisma.message.updateMany({
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: data.conversationId },
+        select: { user1Id: true, user2Id: true },
+      });
+
+      if (!conversation || (conversation.user1Id !== userId && conversation.user2Id !== userId)) {
+        return;
+      }
+
+      const updateResult = await prisma.message.updateMany({
         where: {
           conversationId: data.conversationId,
           senderId: { not: userId },
@@ -583,12 +866,19 @@ io.on('connection', (socket) => {
         data: { status: 'READ' },
       });
 
-      io.to(data.conversationId).emit('message_status_update', {
+      const otherUserId = conversation.user1Id === userId ? conversation.user2Id : conversation.user1Id;
+      const statusPayload = {
         conversationId: data.conversationId,
+        readBy: userId,
         status: 'READ',
-        readerId: userId,
-      });
-    } catch (e) {}
+        readAt: new Date().toISOString(),
+      };
+
+      io.to(data.conversationId).emit('message_status_update', statusPayload);
+      io.to(`user:${otherUserId}`).emit('message_status_update', statusPayload);
+    } catch (e: any) {
+      logger.error(`Error marking messages as read: ${e.message}`);
+    }
   });
 
   // Real-Time Message Delivered ACK (2 Grey Ticks)
@@ -597,6 +887,15 @@ io.on('connection', (socket) => {
     if (!userId || !data?.conversationId) return;
 
     try {
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: data.conversationId },
+        select: { user1Id: true, user2Id: true },
+      });
+
+      if (!conversation || (conversation.user1Id !== userId && conversation.user2Id !== userId)) {
+        return;
+      }
+
       await prisma.message.updateMany({
         where: {
           conversationId: data.conversationId,
@@ -607,48 +906,82 @@ io.on('connection', (socket) => {
         data: { status: 'DELIVERED' },
       });
 
-      io.to(data.conversationId).emit('message_status_update', {
+      const otherUserId = conversation.user1Id === userId ? conversation.user2Id : conversation.user1Id;
+      const statusPayload = {
         conversationId: data.conversationId,
-        status: 'DELIVERED',
         recipientId: userId,
-      });
-    } catch (e) {}
-  });
+        status: 'DELIVERED',
+        deliveredAt: new Date().toISOString(),
+      };
 
-  // Typing Indicator Events (Direct Chat & Group Chat)
-  socket.on('typing_start', (data: { conversationId?: string; groupId?: string; userId: string; userName?: string }) => {
-    if (!data?.userId) return;
-    if (data.conversationId) {
-      socket.to(data.conversationId).emit('user_typing', {
-        conversationId: data.conversationId,
-        userId: data.userId,
-        userName: data.userName || 'Someone',
-        isTyping: true,
-      });
-    } else if (data.groupId) {
-      socket.to(`group_${data.groupId}`).emit('user_typing', {
-        groupId: data.groupId,
-        userId: data.userId,
-        userName: data.userName || 'Member',
-        isTyping: true,
-      });
+      io.to(data.conversationId).emit('message_status_update', statusPayload);
+      io.to(`user:${otherUserId}`).emit('message_status_update', statusPayload);
+    } catch (e: any) {
+      logger.error(`Error marking messages as delivered: ${e.message}`);
     }
   });
 
-  socket.on('typing_stop', (data: { conversationId?: string; groupId?: string; userId: string }) => {
-    if (!data?.userId) return;
+  // Typing Indicator Events (Direct Chat & Group Chat)
+  socket.on('typing_start', async (data: { conversationId?: string; groupId?: string; userName?: string }) => {
+    const userId = socket.data.userId;
+    if (!userId) return;
+
     if (data.conversationId) {
-      socket.to(data.conversationId).emit('user_typing', {
-        conversationId: data.conversationId,
-        userId: data.userId,
-        isTyping: false,
+      const conv = await prisma.conversation.findUnique({
+        where: { id: data.conversationId },
+        select: { user1Id: true, user2Id: true },
       });
+      if (conv && (conv.user1Id === userId || conv.user2Id === userId)) {
+        socket.to(data.conversationId).emit('user_typing', {
+          conversationId: data.conversationId,
+          userId,
+          userName: data.userName || 'Someone',
+          isTyping: true,
+        });
+      }
     } else if (data.groupId) {
-      socket.to(`group_${data.groupId}`).emit('user_typing', {
-        groupId: data.groupId,
-        userId: data.userId,
-        isTyping: false,
+      const member = await prisma.groupMember.findFirst({
+        where: { groupId: data.groupId, userId },
       });
+      if (member) {
+        socket.to(`group_${data.groupId}`).emit('user_typing', {
+          groupId: data.groupId,
+          userId,
+          userName: data.userName || 'Member',
+          isTyping: true,
+        });
+      }
+    }
+  });
+
+  // Typing Stop Handler with Membership Verification (BUG-033)
+  socket.on('typing_stop', async (data: { conversationId?: string; groupId?: string }) => {
+    const userId = socket.data.userId;
+    if (!userId) return;
+
+    if (data.conversationId) {
+      const conv = await prisma.conversation.findUnique({
+        where: { id: data.conversationId },
+        select: { user1Id: true, user2Id: true },
+      });
+      if (conv && (conv.user1Id === userId || conv.user2Id === userId)) {
+        socket.to(data.conversationId).emit('user_typing', {
+          conversationId: data.conversationId,
+          userId,
+          isTyping: false,
+        });
+      }
+    } else if (data.groupId) {
+      const member = await prisma.groupMember.findFirst({
+        where: { groupId: data.groupId, userId },
+      });
+      if (member) {
+        socket.to(`group_${data.groupId}`).emit('user_typing', {
+          groupId: data.groupId,
+          userId,
+          isTyping: false,
+        });
+      }
     }
   });
 
@@ -678,13 +1011,16 @@ io.on('connection', (socket) => {
             redisClient.del(`presence:user:${userId}`).catch(() => {});
           }
           const lastSeenDate = new Date();
+          if (redisClient) {
+            redisClient.set(`presence:last_seen:${userId}`, lastSeenDate.toISOString(), 'EX', 86400 * 30).catch(() => {});
+          }
           try {
-            await prisma.user.update({
-              where: { id: userId },
-              data: { updatedAt: lastSeenDate },
+            await prisma.session.updateMany({
+              where: { userId, status: 'ACTIVE' },
+              data: { lastActive: lastSeenDate },
             });
           } catch {}
-          io.emit('user_presence_change', { userId, status: 'OFFLINE', lastSeen: lastSeenDate.toISOString() });
+          broadcastPresenceChange(userId, 'OFFLINE', lastSeenDate.toISOString());
         }
       }
     }

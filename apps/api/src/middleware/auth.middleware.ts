@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'b2b-secure-jwt-secret-key-2026';
+import { prisma } from '@b2b/database';
+import { JWT_SECRET } from '../config/jwt';
+import { isSuperAdminUser } from '../utils/superAdmin';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -9,11 +10,12 @@ export interface AuthenticatedRequest extends Request {
     email: string;
     role?: string;
     isVerified: boolean;
-    sessionId: string;
+    sessionId?: string;
+    allowedCommunities?: string[];
   };
 }
 
-export const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -21,9 +23,28 @@ export const authenticateToken = (req: AuthenticatedRequest, res: Response, next
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, decoded: any) => {
-    if (err) {
+  jwt.verify(token, JWT_SECRET, async (err, decoded: any) => {
+    if (err || !decoded) {
       return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+
+    // BUG-043: Active session validation against database
+    if (decoded.sessionId) {
+      try {
+        const session = await prisma.session.findUnique({
+          where: { id: decoded.sessionId },
+          select: { status: true },
+        });
+
+        if (!session || session.status !== 'ACTIVE') {
+          return res.status(401).json({
+            error: 'SESSION_REVOKED',
+            message: 'Your session has been terminated or revoked. Please log in again.',
+          });
+        }
+      } catch (dbErr: any) {
+        // Fallback gracefully on temporary DB glitch, still permitting valid JWT
+      }
     }
 
     req.user = decoded;
@@ -32,7 +53,8 @@ export const authenticateToken = (req: AuthenticatedRequest, res: Response, next
 };
 
 export const requireSuperAdmin = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  if (req.user?.role !== 'SUPER_ADMIN') {
+  // BUG-035: Check Super Admin via centralized utility
+  if (!isSuperAdminUser(req.user)) {
     return res.status(403).json({ error: 'Super Admin privileges required' });
   }
   next();

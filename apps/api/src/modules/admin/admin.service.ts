@@ -1,6 +1,7 @@
 import { prisma } from '@b2b/database';
 import bcrypt from 'bcryptjs';
 import { PaginationParams, buildPaginationMeta } from '../../utils/pagination';
+import { isSuperAdminUser, isSuperAdminEmail, getSuperAdminEmail } from '../../utils/superAdmin';
 
 export class AdminService {
   // Get users with database-level server-side pagination, filtering, searching, & sorting
@@ -90,7 +91,7 @@ export class AdminService {
       address: u.business
         ? `${u.business.streetAddress}, ${u.business.city}, ${u.business.state} - ${u.business.pincode}`
         : 'N/A',
-      assignedRole: u.business?.assignedRole || (u.email === 'dnpatel2002@gmail.com' ? 'SUPER_ADMIN' : 'RETAILER'),
+      assignedRole: u.business?.assignedRole || (isSuperAdminEmail(u.email) ? 'SUPER_ADMIN' : 'RETAILER'),
       allowedCommunities: u.business?.allowedCommunities || ['clothing'],
       shopPhotosAndVideos: u.business?.media || [],
       businessId: u.business?.id || null,
@@ -211,7 +212,7 @@ export class AdminService {
     }
 
     // Protection check for Super Admin email
-    if (user.email === 'dnpatel2002@gmail.com' && data.assignedRole && data.assignedRole !== 'SUPER_ADMIN') {
+    if (isSuperAdminEmail(user.email) && data.assignedRole && data.assignedRole !== 'SUPER_ADMIN') {
       throw new Error('Cannot downgrade primary Super Admin role');
     }
 
@@ -266,7 +267,7 @@ export class AdminService {
 
     const where: any = {
       status: 'UNVERIFIED',
-      email: { not: 'dnpatel2002@gmail.com' },
+      email: { not: getSuperAdminEmail() },
     };
 
     if (search && search.length > 0) {
@@ -418,11 +419,7 @@ export class AdminService {
     ]);
 
     // Safely exclude Super Admin sessions in JS (SUPER ADMIN EXCLUDED & PROTECTED)
-    const nonAdminSessions = allSessions.filter((s) => {
-      const isSuperAdminEmail = s.user?.email === 'dnpatel2002@gmail.com';
-      const isSuperAdminRole = s.user?.business?.assignedRole === 'SUPER_ADMIN';
-      return !isSuperAdminEmail && !isSuperAdminRole;
-    });
+    const nonAdminSessions = allSessions.filter((s) => !isSuperAdminUser(s.user));
 
     const formattedSessions = nonAdminSessions.map((s) => ({
       id: s.id,
@@ -459,7 +456,7 @@ export class AdminService {
       include: { user: { include: { business: true } } },
     });
 
-    if (session && (session.user.email === 'dnpatel2002@gmail.com' || session.user.business?.assignedRole === 'SUPER_ADMIN')) {
+    if (session && isSuperAdminUser(session.user)) {
       throw new Error('Super Admin session cannot be revoked or terminated.');
     }
 
@@ -477,7 +474,7 @@ export class AdminService {
       where: {
         status: 'ACTIVE',
         user: {
-          email: { not: 'dnpatel2002@gmail.com' },
+          email: { not: getSuperAdminEmail() },
           NOT: {
             business: {
               assignedRole: 'SUPER_ADMIN',
@@ -492,12 +489,12 @@ export class AdminService {
   }
 
   // Fetch Account Deletion Requests with database pagination
-  static async getDeletionRequests(params: PaginationParams) {
-    const { page, limit, skip, search, startDate, endDate, sortKey, sortOrder } = params;
+  static async getDeletionRequests(params: PaginationParams = {} as any) {
+    const { page = 1, limit = 100, skip = 0, search = '', startDate, endDate, sortKey = 'updatedAt', sortOrder = 'desc' } = params || {};
 
     const where: any = {
       isDeletionRequested: true,
-      email: { not: 'dnpatel2002@gmail.com' },
+      email: { not: getSuperAdminEmail() },
     };
 
     if (search && search.length > 0) {
@@ -535,9 +532,12 @@ export class AdminService {
     ]);
 
     const formattedRequests = users.map((u) => ({
+      id: u.id,
       userId: u.id,
       ownerName: u.fullName,
       shopName: u.business?.shopName || 'N/A',
+      email: u.email,
+      mobileNumber: u.mobileNumber,
       reason: u.deletionReason || 'No reason provided',
       requestedAt: u.updatedAt,
     }));
@@ -552,6 +552,20 @@ export class AdminService {
     };
   }
 
+  // Reject / Dismiss Account Deletion Request
+  static async rejectDeletionRequest(userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error('User not found.');
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isDeletionRequested: false,
+        deletionReason: null,
+      },
+    });
+    return { success: true, message: `Account deletion request for ${user.fullName} dismissed.` };
+  }
+
   // Confirm Permanent Account Deletion from PostgreSQL DB
   static async deleteAccount(userId: string) {
     const user = await prisma.user.findUnique({
@@ -559,7 +573,7 @@ export class AdminService {
       include: { business: true },
     });
 
-    if (user && (user.email === 'dnpatel2002@gmail.com' || user.business?.assignedRole === 'SUPER_ADMIN')) {
+    if (user && isSuperAdminUser(user)) {
       throw new Error('Super Admin account cannot be deleted.');
     }
 

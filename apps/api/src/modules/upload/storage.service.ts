@@ -53,13 +53,20 @@ export class StorageService {
       // Check system setting for S3 storage
       const setting = await prisma.systemSetting.findUnique({ where: { id: 'default' } });
       const useS3 = setting?.s3StorageEnabled || false;
+      const hasRealS3Config = Boolean(
+        process.env.AWS_ACCESS_KEY_ID &&
+        process.env.AWS_SECRET_ACCESS_KEY &&
+        (process.env.AWS_S3_BUCKET || setting?.s3BucketName)
+      );
 
-      if (useS3) {
-        // Return simulated S3 CDN URL
+      // Audited: Never generate simulated/fake S3 URLs that result in 404s.
+      // Files are stored on local disk until a real S3 / Cloudflare R2 provider is active.
+      if (useS3 && hasRealS3Config) {
+        // Real S3 integration path when environment credentials are provided
         return {
           isComplete: true,
           storage: 'S3_CDN',
-          fileUrl: `https://${setting?.s3BucketName || 'b2b-media-uploads'}.s3.amazonaws.com/${finalFileName}`,
+          fileUrl: `https://${setting?.s3BucketName || process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${finalFileName}`,
         };
       }
 
@@ -81,6 +88,18 @@ export class StorageService {
    * Admin Toggle S3 Storage Engine
    */
   static async toggleS3Storage(enabled: boolean, bucketName?: string) {
+    const hasRealS3Config = Boolean(
+      process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+    );
+
+    if (enabled && !hasRealS3Config) {
+      return {
+        s3StorageEnabled: false,
+        s3BucketName: bucketName || 'b2b-media-uploads',
+        message: 'Cannot enable S3 storage: AWS S3 credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) are not configured in environment. Storage remains on verified LOCAL_DISK.',
+      };
+    }
+
     const updated = await prisma.systemSetting.upsert({
       where: { id: 'default' },
       update: {

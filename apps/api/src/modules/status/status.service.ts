@@ -1,4 +1,5 @@
 import { prisma } from '@b2b/database';
+import { isSuperAdminUser, isSuperAdminEmail } from '../../utils/superAdmin';
 
 export class StatusService {
   /**
@@ -128,9 +129,8 @@ export class StatusService {
 
     const isSuperAdmin =
       tokenRole === 'SUPER_ADMIN' ||
-      tokenEmail === 'dnpatel2002@gmail.com' ||
-      viewer.email === 'dnpatel2002@gmail.com' ||
-      viewer.business?.assignedRole === 'SUPER_ADMIN';
+      isSuperAdminEmail(tokenEmail) ||
+      isSuperAdminUser(viewer);
 
     // 24h freshness filter
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -228,6 +228,22 @@ export class StatusService {
       throw new Error('Status story not found');
     }
 
+    // Strict Community Isolation Check: Viewers can only view stories of their allowed category communities
+    const viewer = await prisma.user.findUnique({
+      where: { id: viewerUserId },
+      include: { business: true },
+    });
+
+    const isSuperAdmin = isSuperAdminUser(viewer);
+
+    if (!isSuperAdmin && status.userId !== viewerUserId) {
+      const viewerComms = viewer?.business?.allowedCommunities || ['clothing'];
+      const hasOverlap = status.categories.some((c: string) => viewerComms.includes(c));
+      if (!hasOverlap) {
+        throw new Error('COMMUNITY_ISOLATION: You cannot view stories outside your assigned category community.');
+      }
+    }
+
     // Record view in database (upsert to avoid duplicates)
     try {
       await prisma.statusView.upsert({
@@ -267,9 +283,8 @@ export class StatusService {
 
     const isSuperAdmin =
       tokenRole === 'SUPER_ADMIN' ||
-      tokenEmail === 'dnpatel2002@gmail.com' ||
-      requester?.email === 'dnpatel2002@gmail.com' ||
-      requester?.business?.assignedRole === 'SUPER_ADMIN';
+      isSuperAdminEmail(tokenEmail) ||
+      isSuperAdminUser(requester);
 
     const status = await prisma.status.findUnique({
       where: { id: statusId },
@@ -329,9 +344,8 @@ export class StatusService {
 
     const isSuperAdmin =
       tokenRole === 'SUPER_ADMIN' ||
-      tokenEmail === 'dnpatel2002@gmail.com' ||
-      requester?.email === 'dnpatel2002@gmail.com' ||
-      requester?.business?.assignedRole === 'SUPER_ADMIN';
+      isSuperAdminEmail(tokenEmail) ||
+      isSuperAdminUser(requester);
 
     const existing = await prisma.status.findUnique({
       where: { id: statusId },

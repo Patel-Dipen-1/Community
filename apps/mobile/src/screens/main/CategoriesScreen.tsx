@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  FlatList,
   Modal,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -13,61 +12,94 @@ import { MainTabParamList, RootStackParamList } from '../../types/navigation.typ
 import { Header } from '../../components/common/Header';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
+import { useAppSelector } from '../../hooks/useRedux';
 
 type Props = NativeStackScreenProps<MainTabParamList & RootStackParamList, 'Categories'>;
 
+const ALL_MASTER_CATEGORIES = [
+  {
+    id: 'clothing',
+    name: '👕 Clothing & Textiles',
+    slug: 'clothing',
+    specs: ['Fabric', 'GSM Weight', 'Size Tiers', 'Gender', 'Pattern'],
+    subcategories: ['Shirts', 'Jeans', 'Kurtis', 'Sarees', 'Tracksuits'],
+  },
+  {
+    id: 'hardware',
+    name: '🔧 Hardware & Tools',
+    slug: 'hardware',
+    specs: ['Material Grade', 'Dimension MM', 'MOQ Units', 'Coating Finish'],
+    subcategories: ['Fasteners', 'Power Tools', 'Safety Gear', 'Pipes', 'Valves'],
+  },
+  {
+    id: 'electronics',
+    name: '⚡ Electronics & Gadgets',
+    slug: 'electronics',
+    specs: ['Warranty Months', 'Voltage Rating', 'Brand SKU', 'Port Type'],
+    subcategories: ['Smartphones', 'Audio Gear', 'Power Banks', 'Accessories', 'Chargers'],
+  },
+  {
+    id: 'grocery',
+    name: '🌾 Grocery & FMCG',
+    slug: 'grocery',
+    specs: ['Packaging Type', 'Origin Estate', 'Grade Quality', 'Shelf Life'],
+    subcategories: ['Spices', 'Grains & Pulses', 'Dry Fruits', 'Edible Oils'],
+  },
+  {
+    id: 'jewellery',
+    name: '💎 Gold & Jewellery',
+    slug: 'jewellery',
+    specs: ['Purity Karat', 'Certification Tag', 'Weight Grams', 'Type'],
+    subcategories: ['1 Gram Gold', 'Original Gold', 'Silver Ornaments', 'Imitation'],
+  },
+];
+
 export const CategoriesScreen: React.FC<Props> = ({ navigation }) => {
-  const [selectedCategory, setSelectedCategory] = useState<string>('clothing');
+  const { user } = useAppSelector((state) => state.auth);
+
+  const isSuperAdmin = Boolean(
+    (user as any)?.role === 'SUPER_ADMIN' ||
+    user?.email === 'dnpatel2002@gmail.com' ||
+    (user as any)?.assignedRole === 'SUPER_ADMIN' ||
+    user?.business?.assignedRole === 'SUPER_ADMIN'
+  );
+
+  const allowedSlugs: string[] = isSuperAdmin
+    ? ['clothing', 'hardware', 'electronics', 'grocery', 'jewellery']
+    : (user?.business?.allowedCommunities && user.business.allowedCommunities.length > 0)
+    ? user.business.allowedCommunities.map((c) => c.toLowerCase())
+    : ['clothing'];
+
+  const categories = ALL_MASTER_CATEGORIES.filter((cat) => allowedSlugs.includes(cat.slug));
+
+  const [selectedCategory, setSelectedCategory] = useState<string>(
+    categories[0]?.slug || 'hardware'
+  );
   const [modalVisible, setModalVisible] = useState(false);
   const [requestValue, setRequestValue] = useState('');
 
-  const categories = [
-    {
-      id: 'clothing',
-      name: '👕 Clothing & Textiles',
-      slug: 'clothing',
-      specs: ['Fabric', 'GSM Weight', 'Size Tiers', 'Gender', 'Pattern'],
-      subcategories: ['Shirts', 'Jeans', 'Kurtis', 'Sarees', 'Tracksuits'],
-    },
-    {
-      id: 'jewellery',
-      name: '💎 Gold & Jewellery',
-      slug: 'jewellery',
-      specs: ['Purity Karat', 'Certification Tag', 'Weight Grams', 'Type'],
-      subcategories: ['1 Gram Gold', 'Original Gold', 'Silver Ornaments', 'Imitation'],
-    },
-    {
-      id: 'electronics',
-      name: '⚡ Electronics & Gadgets',
-      slug: 'electronics',
-      specs: ['Warranty Months', 'Voltage Rating', 'Brand SKU'],
-      subcategories: ['Smartphones', 'Audio Gear', 'Power Banks', 'Accessories'],
-    },
-    {
-      id: 'hardware',
-      name: '🔧 Hardware & Tools',
-      slug: 'hardware',
-      specs: ['Material Grade', 'Dimension MM', 'MOQ Units'],
-      subcategories: ['Fasteners', 'Power Tools', 'Safety Gear', 'Pipes'],
-    },
-  ];
+  useEffect(() => {
+    if (categories.length > 0 && !categories.some((c) => c.slug === selectedCategory)) {
+      setSelectedCategory(categories[0].slug);
+    }
+  }, [allowedSlugs.join(','), selectedCategory]);
 
-  const activeCatObj = categories.find((c) => c.slug === selectedCategory) || categories[0];
+  const activeCatObj = categories.find((c) => c.slug === selectedCategory) || categories[0] || ALL_MASTER_CATEGORIES[0];
 
   return (
     <View style={styles.container}>
       <Header
-        title="Trade Categories & Specs"
-        subtitle="Multi-Community Category Authorization"
+        title="Categories & Specs"
+        subtitle="Trade Attributes & Standards"
         rightElement={
-          <TouchableOpacity style={styles.reqBtn} onPress={() => setModalVisible(true)}>
-            <Text style={styles.reqBtnText}>+ Request Attribute</Text>
+          <TouchableOpacity style={styles.reqBtn} onPress={() => setModalVisible(true)} activeOpacity={0.8}>
+            <Text style={styles.reqBtnText}>+ Request</Text>
           </TouchableOpacity>
         }
       />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Category Selection Grid */}
+        {/* Category Selection Grid - Only showing user's permitted categories */}
         <View style={styles.catGrid}>
           {categories.map((cat) => {
             const isSelected = selectedCategory === cat.slug;
@@ -76,6 +108,7 @@ export const CategoriesScreen: React.FC<Props> = ({ navigation }) => {
                 key={cat.id}
                 style={[styles.catCard, isSelected && styles.catCardSelected]}
                 onPress={() => setSelectedCategory(cat.slug)}
+                activeOpacity={0.8}
               >
                 <Text style={styles.catName}>{cat.name}</Text>
                 <Text style={styles.catCount}>{cat.subcategories.length} Subcategories</Text>
@@ -85,26 +118,28 @@ export const CategoriesScreen: React.FC<Props> = ({ navigation }) => {
         </View>
 
         {/* Selected Category Breakdown */}
-        <View style={styles.detailBox}>
-          <Text style={styles.detailTitle}>{activeCatObj.name} Specifications</Text>
+        {activeCatObj && (
+          <View style={styles.detailBox}>
+            <Text style={styles.detailTitle}>{activeCatObj.name} Specifications</Text>
 
-          <Text style={styles.subLabel}>Supported Subcategories:</Text>
-          <View style={styles.tagWrap}>
-            {activeCatObj.subcategories.map((sub) => (
-              <View key={sub} style={styles.subTag}>
-                <Text style={styles.subTagText}>{sub}</Text>
+            <Text style={styles.subLabel}>Supported Subcategories:</Text>
+            <View style={styles.tagWrap}>
+              {activeCatObj.subcategories.map((sub) => (
+                <View key={sub} style={styles.subTag}>
+                  <Text style={styles.subTagText}>{sub}</Text>
+                </View>
+              ))}
+            </View>
+
+            <Text style={[styles.subLabel, { marginTop: 14 }]}>Server-Side Specification Attributes:</Text>
+            {activeCatObj.specs.map((spec) => (
+              <View key={spec} style={styles.specRow}>
+                <Text style={styles.specBullet}>🔹</Text>
+                <Text style={styles.specText}>{spec}</Text>
               </View>
             ))}
           </View>
-
-          <Text style={[styles.subLabel, { marginTop: 14 }]}>Server-Side Specification Attributes:</Text>
-          {activeCatObj.specs.map((spec) => (
-            <View key={spec} style={styles.specRow}>
-              <Text style={styles.specBullet}>🔹</Text>
-              <Text style={styles.specText}>{spec}</Text>
-            </View>
-          ))}
-        </View>
+        )}
       </ScrollView>
 
       {/* Attribute Request Modal */}
@@ -113,12 +148,12 @@ export const CategoriesScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Request New Category Attribute</Text>
             <Text style={styles.modalSub}>
-              Propose a missing fabric, size tier, or specification to Super Admin.
+              Propose a missing specification attribute for your verified business sector.
             </Text>
 
             <Input
               label="Attribute Name / Value"
-              placeholder="e.g. Organic Bamboo Fabric"
+              placeholder="e.g. Metric Thread Pitch (ISO 965)"
               value={requestValue}
               onChangeText={setRequestValue}
             />

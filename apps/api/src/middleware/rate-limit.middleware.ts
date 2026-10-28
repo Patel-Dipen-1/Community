@@ -44,3 +44,15 @@ export const messageRateLimiter = rateLimit({
   }
 });
 
+// Rate Limiter for File Uploads (60 uploads per 10 minutes)
+export const uploadRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Upload rate limit exceeded. Please try again after a few minutes.'
+  }
+});
+
+

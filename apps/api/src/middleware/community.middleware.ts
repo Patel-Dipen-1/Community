@@ -1,10 +1,11 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from './auth.middleware';
 import { prisma } from '@b2b/database';
+import { isSuperAdminUser } from '../utils/superAdmin';
 
 export const requireVerifiedUser = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  // Super Admin or primary admin email is always verified
-  if (req.user?.role === 'SUPER_ADMIN' || req.user?.email === 'dnpatel2002@gmail.com') {
+  // Super Admin or primary admin is always verified
+  if (isSuperAdminUser(req.user)) {
     if (req.user) req.user.isVerified = true;
     return next();
   }
@@ -44,8 +45,8 @@ export const enforceCommunityIsolation = (req: AuthenticatedRequest, res: Respon
     'clothing'
   ) as string;
 
-  // Super Admin or dnpatel2002@gmail.com can access all communities
-  if (req.user?.role === 'SUPER_ADMIN' || req.user?.email === 'dnpatel2002@gmail.com') {
+  // Super Admin can access all communities
+  if (isSuperAdminUser(req.user)) {
     (req as any).activeCommunityId = requestedCommunityId;
     return next();
   }

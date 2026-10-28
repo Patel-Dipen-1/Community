@@ -338,6 +338,28 @@ export function ClothingProductCreateModal({ isOpen, onClose, onSuccess }: Cloth
     }
   };
 
+  const webDefaultCategories: Record<string, string[]> = {
+    clothing: ['Ethnic and Kurtis', 'Western Wear', 'Sarees and Lehengas', "Men's Wear", 'Fabrics and Materials'],
+    hardware: ['Power Tools', 'Hand Tools', 'Fasteners and Bolts', 'Safety Equipment', 'Plumbing and Pipes'],
+    jewellery: ['Gold Jewellery', 'Diamond Jewellery', '1 Gram Gold / Imitation', 'Sterling Silver 925'],
+    electronics: ['Smartphones and Accessories', 'Audio and Speakers', 'Cables and Chargers', 'LED Lighting'],
+    grocery: ['Spices and Masala', 'Grains and Pulses', 'Edible Oils', 'Dry Fruits and Nuts'],
+  };
+
+  const rawWebCats = (currentComm?.categories || [])
+    .map((cat: any) => typeof cat === 'string' ? cat.trim() : String(cat.name || cat.label || cat.title || '').trim())
+    .filter((c: string) => c.length > 0 && /[a-z0-9]/i.test(c));
+
+  const sanitizedCategoriesList = rawWebCats.length > 0
+    ? rawWebCats
+    : (webDefaultCategories[activeCommunityId.toLowerCase()] || ['General Wholesale', 'Bulk Goods']);
+
+  useEffect(() => {
+    if (sanitizedCategoriesList.length > 0 && (!selectedCategory || !sanitizedCategoriesList.includes(selectedCategory))) {
+      setSelectedCategory(sanitizedCategoriesList[0]);
+    }
+  }, [activeCommunityId, sanitizedCategoriesList.join(',')]);
+
   return (
     <FormModal
       isOpen={isOpen}
@@ -458,8 +480,8 @@ export function ClothingProductCreateModal({ isOpen, onClose, onSuccess }: Cloth
                 onChange={(e) => setSelectedCategory(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-indigo-500 font-bold"
               >
-                {currentComm?.categories?.map((cat: any) => (
-                  <option key={cat.id || cat.name} value={cat.name}>{cat.name}</option>
+                {sanitizedCategoriesList.map((catName: string) => (
+                  <option key={catName} value={catName}>{catName}</option>
                 ))}
               </select>
             </div>

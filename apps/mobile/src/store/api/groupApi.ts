@@ -58,7 +58,7 @@ export const groupApi = baseApi.injectEndpoints({
 
     sendGroupMessage: builder.mutation<
       { message: GroupMessageItem },
-      { groupId: string; text?: string; productCode?: string; mediaUrl?: string; replyToId?: string }
+      { groupId: string; text?: string; productCode?: string; mediaUrl?: string; replyToId?: string; clientMessageId?: string }
     >({
       query: ({ groupId, ...data }) => ({
         url: `/groups/${groupId}/messages`,

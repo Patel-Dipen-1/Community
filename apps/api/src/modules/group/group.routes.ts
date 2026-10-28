@@ -10,6 +10,10 @@ router.get('/', authenticateToken, GroupController.getAll);
 // Create Group or Broadcast Channel (Approved Users Only)
 router.post('/', authenticateToken, GroupController.create);
 
+// Global Default Capacity Limit (Get & Update) - Must be registered before /:id dynamic route
+router.get('/global-capacity', authenticateToken, GroupController.getGlobalCapacity);
+router.post('/global-capacity', authenticateToken, GroupController.updateGlobalCapacity);
+
 // Get Group Details with Privacy Masking (Messages & Member List)
 router.get('/:id', authenticateToken, GroupController.getDetails);
 
@@ -49,9 +53,6 @@ router.put('/:id/settings', authenticateToken, GroupController.updateSettings);
 // Delete Group (Group Admin Only -> Disbands group for all members)
 router.delete('/:id', authenticateToken, GroupController.deleteGroup);
 
-// Global Default Capacity Limit (Get & Update)
-router.get('/global-capacity', GroupController.getGlobalCapacity);
-router.post('/global-capacity', authenticateToken, GroupController.updateGlobalCapacity);
 
 // Super Admin Update Specific Group Capacity Limit
 router.put('/:id/capacity', authenticateToken, GroupController.updateCapacity);

@@ -1,4 +1,5 @@
 import { prisma } from '@b2b/database';
+import { isSuperAdminUser } from './superAdmin';
 
 export interface UserCategoryProfile {
   userId: string;
@@ -23,8 +24,7 @@ export async function getUserCategoryProfile(userId: string): Promise<UserCatego
   if (!user) return null;
 
   const isApproved = Boolean(user.status !== 'BLOCKED' && (user.status as string) !== 'BLACK');
-  const isSuperAdmin =
-    user.email === 'dnpatel2002@gmail.com' || user.business?.assignedRole === 'SUPER_ADMIN';
+  const isSuperAdmin = isSuperAdminUser(user);
   const allowedCommunities = user.business?.allowedCommunities || ['clothing'];
 
   return {

@@ -4,6 +4,10 @@ import { authenticateToken, requireSuperAdmin } from '../../middleware/auth.midd
 
 const router = Router();
 
+// BUG-037: Enforce authentication & Super Admin privileges on all admin endpoints
+router.use(authenticateToken as any);
+router.use(requireSuperAdmin as any);
+
 // Super Admin User Management (User CRUD)
 router.get('/users', AdminController.getAllUsers);
 router.post('/users', AdminController.createUser);
@@ -23,6 +27,7 @@ router.post('/terminate-all-sessions', AdminController.terminateAllSessions);
 // Account Deletion Request Queue & Approval
 router.get('/deletion-requests', AdminController.getDeletionRequests);
 router.delete('/delete-account/:userId', AdminController.deleteAccount);
+router.post('/reject-deletion/:userId', AdminController.rejectDeletionRequest);
 
 // Super Admin Multi-Community Permission Grant & Override Edit
 router.post('/assign-communities', AdminController.assignCommunities);

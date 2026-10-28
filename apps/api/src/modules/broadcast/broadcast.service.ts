@@ -1,6 +1,7 @@
 import { prisma } from '@b2b/database';
 import { AuthorizationService } from '../admin/authz.service';
 import { ChatService } from '../chat/chat.service';
+import { isSuperAdminUser } from '../../utils/superAdmin';
 
 export interface CreateBroadcastInput {
   title: string;
@@ -43,9 +44,7 @@ export class BroadcastService {
     }
 
     const creatorComms = creator.business?.allowedCommunities || ['clothing'];
-    const isCreatorSuperAdmin =
-      creator.email === 'dnpatel2002@gmail.com' ||
-      creator.business?.assignedRole === 'SUPER_ADMIN';
+    const isCreatorSuperAdmin = isSuperAdminUser(creator);
 
     // Fetch candidate recipient users with business details
     const candidateUsers = await prisma.user.findMany({
@@ -75,9 +74,7 @@ export class BroadcastService {
       if (blockedUserIds.has(user.id)) return false;
 
       const targetComms = user.business?.allowedCommunities || ['clothing'];
-      const isTargetSuperAdmin =
-        user.email === 'dnpatel2002@gmail.com' ||
-        user.business?.assignedRole === 'SUPER_ADMIN';
+      const isTargetSuperAdmin = isSuperAdminUser(user);
 
       const hasSharedCommunity =
         isCreatorSuperAdmin ||

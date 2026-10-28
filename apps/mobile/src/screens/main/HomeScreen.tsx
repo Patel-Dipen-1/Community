@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  FlatList,
   TouchableOpacity,
   RefreshControl,
   Image,
   TextInput,
   Modal,
+  Animated,
+  Easing,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MainTabParamList, RootStackParamList } from '../../types/navigation.types';
@@ -18,15 +19,99 @@ import { ProductCard } from '../../components/common/ProductCard';
 import { EmptyState } from '../../components/common/EmptyState';
 import { useGetProductsQuery } from '../../store/api/productApi';
 import { useGetStatusesQuery, useViewStatusMutation, useGetStatusViewersQuery, StatusItem } from '../../store/api/statusApi';
+import { useGetMyStoreQuery } from '../../store/api/storeApi';
 import { colors, spacing, borderRadius } from '../../theme/theme';
 import { useAppSelector } from '../../hooks/useRedux';
 
 type Props = NativeStackScreenProps<MainTabParamList & RootStackParamList, 'Home'>;
 
+const STORY_DURATION = 5000; // WhatsApp 5-second story duration
+
+// Platform community master metadata
+const COMMUNITY_META_MAP: Record<string, { slug: string; name: string }> = {
+  clothing: { slug: 'clothing', name: '👕 Clothing' },
+  hardware: { slug: 'hardware', name: '🔧 Hardware' },
+  electronics: { slug: 'electronics', name: '⚡ Electronics' },
+  grocery: { slug: 'grocery', name: '🌾 Grocery' },
+  jewellery: { slug: 'jewellery', name: '💎 Jewellery' },
+  jewelry: { slug: 'jewellery', name: '💎 Jewellery' },
+  footwear: { slug: 'footwear', name: '👞 Footwear' },
+  textiles: { slug: 'textiles', name: '🧵 Textiles' },
+  food: { slug: 'food', name: '🍲 Food & FMCG' },
+  handicrafts: { slug: 'handicrafts', name: '🎨 Handicrafts' },
+  cosmetics: { slug: 'cosmetics', name: '💄 Cosmetics' },
+  xyz: { slug: 'xyz', name: '🏷️ Xyz' },
+};
+
+const ALL_SYSTEM_COMMUNITIES = ['clothing', 'hardware', 'electronics', 'grocery'];
+
 export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const { user } = useAppSelector((state) => state.auth);
-  const [activeCommunity, setActiveCommunity] = useState<string>('clothing');
+  const { data: storeData } = useGetMyStoreQuery();
+
+  const isSuperAdmin = Boolean(
+    (user as any)?.role === 'SUPER_ADMIN' ||
+    user?.email === 'dnpatel2002@gmail.com' ||
+    (user as any)?.assignedRole === 'SUPER_ADMIN' ||
+    user?.business?.assignedRole === 'SUPER_ADMIN'
+  );
+
+  // Dynamic user-allowed communities (checks user.allowedCommunities, user.business, and storeData)
+  const rawAllowed: any[] =
+    (user as any)?.allowedCommunities ||
+    user?.business?.allowedCommunities ||
+    (storeData as any)?.business?.allowedCommunities ||
+    (storeData as any)?.store?.business?.allowedCommunities ||
+    [];
+
+  // Sanitize allowed communities: filter out empty strings, blank spaces, or non-alphanumeric entries
+  const sanitizedAllowed: string[] = Array.isArray(rawAllowed)
+    ? rawAllowed
+        .map((c: any) => {
+          if (typeof c === 'string') return c.trim().toLowerCase();
+          if (c && typeof c === 'object') return (c.slug || c.id || c.name || '').trim().toLowerCase();
+          return '';
+        })
+        .filter((c: string) => Boolean(c) && c.length > 0 && /[a-z0-9]/i.test(c))
+    : [];
+
+  const userAllowedCommunities: string[] = isSuperAdmin
+    ? ALL_SYSTEM_COMMUNITIES
+    : sanitizedAllowed.length > 0
+    ? Array.from(new Set(sanitizedAllowed))
+    : ['hardware'];
+
+  const dynamicCommunities = userAllowedCommunities
+    .map((slug) => {
+      if (COMMUNITY_META_MAP[slug]) {
+        return COMMUNITY_META_MAP[slug];
+      }
+      const cleanSlug = slug.replace(/[^a-z0-9\s-]/gi, '').trim();
+      const label = cleanSlug.length > 0
+        ? cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)
+        : slug.charAt(0).toUpperCase() + slug.slice(1);
+      return {
+        slug,
+        name: `🏷️ ${label}`,
+      };
+    })
+    .filter((c) => {
+      // Guarantee non-empty text label after emoji
+      const textOnly = c.name.replace(/[^a-zA-Z0-9]/g, '').trim();
+      return textOnly.length > 0;
+    });
+
+  const [activeCommunity, setActiveCommunity] = useState<string>(
+    userAllowedCommunities[0] || 'hardware'
+  );
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Automatically select the user's first allowed community as soon as user/store profile loads
+  useEffect(() => {
+    if (userAllowedCommunities.length > 0 && !userAllowedCommunities.includes(activeCommunity)) {
+      setActiveCommunity(userAllowedCommunities[0]);
+    }
+  }, [userAllowedCommunities.join(','), activeCommunity]);
 
   const {
     data: productsData,
@@ -40,12 +125,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
   const {
     data: statusesData,
     refetch: refetchStatuses,
-  } = useGetStatusesQuery({ category: activeCommunity });
+  } = useGetStatusesQuery();
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeStoryGroup, setActiveStoryGroup] = useState<StatusItem[] | null>(null);
   const [activeStoryIndex, setActiveStoryIndex] = useState<number>(0);
   const [showViewersSheet, setShowViewersSheet] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
 
   const [viewStatus] = useViewStatusMutation();
 
@@ -56,10 +142,47 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
     { skip: !currentActiveStory?.id || !showViewersSheet }
   );
 
+  // WhatsApp 5-Second Progress Timer Animation
+  const storyProgress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!activeStoryGroup || !currentActiveStory || showViewersSheet || isPaused) {
+      storyProgress.stopAnimation();
+      return;
+    }
+
+    storyProgress.setValue(0);
+    const anim = Animated.timing(storyProgress, {
+      toValue: 1,
+      duration: STORY_DURATION,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    });
+
+    anim.start(({ finished }) => {
+      if (finished) {
+        if (activeStoryIndex < activeStoryGroup.length - 1) {
+          const nextIdx = activeStoryIndex + 1;
+          setActiveStoryIndex(nextIdx);
+          if (activeStoryGroup[nextIdx]?.id) {
+            viewStatus(activeStoryGroup[nextIdx].id);
+          }
+        } else {
+          setActiveStoryGroup(null);
+        }
+      }
+    });
+
+    return () => {
+      anim.stop();
+    };
+  }, [activeStoryGroup, activeStoryIndex, showViewersSheet, isPaused]);
+
   const handleOpenStoryGroup = (group: StatusItem[], startIdx = 0) => {
     setActiveStoryGroup(group);
     setActiveStoryIndex(startIdx);
     setShowViewersSheet(false);
+    setIsPaused(false);
     if (group[startIdx]?.id) {
       try {
         viewStatus(group[startIdx].id);
@@ -69,26 +192,53 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  const handlePrevStory = () => {
+    if (activeStoryIndex > 0) {
+      const prevIdx = activeStoryIndex - 1;
+      setActiveStoryIndex(prevIdx);
+      setShowViewersSheet(false);
+      if (activeStoryGroup && activeStoryGroup[prevIdx]?.id) {
+        viewStatus(activeStoryGroup[prevIdx].id);
+      }
+    }
+  };
+
+  const handleNextStory = () => {
+    if (activeStoryGroup && activeStoryIndex < activeStoryGroup.length - 1) {
+      const nextIdx = activeStoryIndex + 1;
+      setActiveStoryIndex(nextIdx);
+      setShowViewersSheet(false);
+      if (activeStoryGroup[nextIdx]?.id) {
+        viewStatus(activeStoryGroup[nextIdx].id);
+      }
+    } else {
+      setActiveStoryGroup(null);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await Promise.all([refetchProducts(), refetchStatuses()]);
     setRefreshing(false);
   };
 
-  const communities = [
-    { slug: 'clothing', name: '👕 Clothing' },
-    { slug: 'jewellery', name: '💎 Jewellery' },
-    { slug: 'electronics', name: '⚡ Electronics' },
-    { slug: 'hardware', name: '🔧 Hardware' },
-  ];
-
-  // Group all feed statuses strictly by poster userId
+  // STRICT STORY COMMUNITY ISOLATION:
+  // Only display statuses targeting the user's active community, plus the user's own status
+  const allStatuses = statusesData?.statuses || [];
   const groupedStatuses: { [userId: string]: StatusItem[] } = {};
-  statusesData?.statuses?.forEach((st) => {
-    if (!groupedStatuses[st.userId]) {
-      groupedStatuses[st.userId] = [];
+
+  allStatuses.forEach((st) => {
+    const isOwnStatus = st.userId === user?.id;
+    const matchesActiveCommunity =
+      !activeCommunity ||
+      st.categories?.some((cat) => cat.toLowerCase() === activeCommunity.toLowerCase());
+
+    if (matchesActiveCommunity || isOwnStatus) {
+      if (!groupedStatuses[st.userId]) {
+        groupedStatuses[st.userId] = [];
+      }
+      groupedStatuses[st.userId].push(st);
     }
-    groupedStatuses[st.userId].push(st);
   });
 
   const myStatusList = groupedStatuses[user?.id || ''] || [];
@@ -98,7 +248,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
     <View style={styles.container}>
       <Header
         title="B2B Trade Platform"
-        subtitle={`Verified Account: ${user?.business?.shopName || user?.fullName}`}
+        subtitle={`Verified Account: ${user?.business?.shopName || (user as any)?.shopName || user?.fullName}`}
         rightElement={
           <TouchableOpacity
             style={styles.profileBadge}
@@ -129,23 +279,31 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
           />
         </View>
 
-        {/* Community Switcher Pills */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.communityBar}>
-          {communities.map((c) => {
-            const isActive = activeCommunity === c.slug;
-            return (
-              <TouchableOpacity
-                key={c.slug}
-                style={[styles.communityPill, isActive && styles.communityPillActive]}
-                onPress={() => setActiveCommunity(c.slug)}
-              >
-                <Text style={[styles.communityText, isActive && styles.communityTextActive]}>
-                  {c.name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        {/* Community Switcher Pills - DYNAMICALLY STRICT TO USER'S ALLOWED COMMUNITIES */}
+        {dynamicCommunities.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.communityBar}
+            contentContainerStyle={styles.communityBarContent}
+          >
+            {dynamicCommunities.map((c) => {
+              const isActive = activeCommunity === c.slug;
+              return (
+                <TouchableOpacity
+                  key={c.slug}
+                  style={[styles.communityPill, isActive && styles.communityPillActive]}
+                  onPress={() => setActiveCommunity(c.slug)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.communityText, isActive && styles.communityTextActive]}>
+                    {c.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
 
         {/* 24h Stories / Status Bar */}
         <View style={styles.sectionHeader}>
@@ -158,42 +316,56 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statusesBar}>
           {/* MY STATUS ITEM */}
           <View style={styles.statusItem}>
-            <TouchableOpacity
-              style={[styles.statusRing, myStatusList.length > 0 ? styles.statusRingUnseen : styles.statusRingAdd]}
-              onPress={() => {
-                if (myStatusList.length > 0) {
-                  handleOpenStoryGroup(myStatusList, 0);
-                } else {
-                  navigation.navigate('CreateStatus');
-                }
-              }}
-            >
-              {user?.avatar || myStatusList[0]?.mediaUrl ? (
-                <Image source={{ uri: user?.avatar || myStatusList[0]?.mediaUrl }} style={styles.statusAvatar} />
-              ) : (
-                <View style={styles.statusAvatarFallback}>
-                  <Text style={styles.statusAvatarFallbackText}>
-                    {user?.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
-                  </Text>
-                </View>
-              )}
+            <View style={styles.statusAvatarWrapper}>
+              <TouchableOpacity
+                style={[
+                  styles.statusRing,
+                  myStatusList.length > 0 ? styles.statusRingUnseen : styles.statusRingAdd,
+                ]}
+                onPress={() => {
+                  if (myStatusList.length > 0) {
+                    handleOpenStoryGroup(myStatusList, 0);
+                  } else {
+                    navigation.navigate('CreateStatus');
+                  }
+                }}
+                activeOpacity={0.8}
+              >
+                {user?.avatar || myStatusList[0]?.mediaUrl ? (
+                  <Image
+                    source={{ uri: user?.avatar || myStatusList[0]?.mediaUrl }}
+                    style={styles.statusAvatar}
+                  />
+                ) : (
+                  <View style={styles.statusAvatarFallback}>
+                    <Text style={styles.statusAvatarFallbackText}>
+                      {user?.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Independent + Badge Button */}
               <TouchableOpacity
                 style={styles.addStatusBadgeBtn}
                 onPress={() => navigation.navigate('CreateStatus')}
+                activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Text style={styles.addStatusBadgeText}>+</Text>
               </TouchableOpacity>
-            </TouchableOpacity>
+            </View>
             <Text style={styles.statusName} numberOfLines={1}>
               My Status
             </Text>
           </View>
 
-          {/* OTHER SUPPLIERS' STATUS UPDATES (Grouped per vendor) */}
+          {/* OTHER SUPPLIERS' STATUS UPDATES (Filtered strictly to active allowed community) */}
           {otherPosterUserIds.map((posterUid) => {
             const vendorStatuses = groupedStatuses[posterUid];
             const latestStatus = vendorStatuses[0];
-            const posterName = latestStatus?.business?.shopName || latestStatus?.user?.fullName || 'Vendor';
+            const posterName =
+              latestStatus?.business?.shopName || latestStatus?.user?.fullName || 'Vendor';
 
             // Check if any status in this group is unseen by current user
             const isAllSeen = vendorStatuses.every((st) =>
@@ -205,10 +377,19 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                 key={posterUid}
                 style={styles.statusItem}
                 onPress={() => handleOpenStoryGroup(vendorStatuses, 0)}
+                activeOpacity={0.8}
               >
-                <View style={[styles.statusRing, isAllSeen ? styles.statusRingSeen : styles.statusRingUnseen]}>
+                <View
+                  style={[
+                    styles.statusRing,
+                    isAllSeen ? styles.statusRingSeen : styles.statusRingUnseen,
+                  ]}
+                >
                   {latestStatus?.user?.avatar || latestStatus?.mediaUrl ? (
-                    <Image source={{ uri: latestStatus.user?.avatar || latestStatus.mediaUrl }} style={styles.statusAvatar} />
+                    <Image
+                      source={{ uri: latestStatus.user?.avatar || latestStatus.mediaUrl }}
+                      style={styles.statusAvatar}
+                    />
                   ) : (
                     <View style={styles.statusAvatarFallback}>
                       <Text style={styles.statusAvatarFallbackText}>
@@ -226,52 +407,72 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         </ScrollView>
 
         {/* Quick Action Shortcuts */}
-        <View style={styles.quickGrid}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.quickScroll}
+          contentContainerStyle={styles.quickScrollContent}
+        >
           <TouchableOpacity
             style={styles.quickCard}
             onPress={() => navigation.navigate('Main', { screen: 'Categories' })}
+            activeOpacity={0.7}
           >
-            <Text style={styles.quickIcon}>🏷️</Text>
-            <Text style={styles.quickTitle}>Categories</Text>
+            <View style={[styles.quickIconBox, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+              <Text style={styles.quickIcon}>🏷️</Text>
+            </View>
+            <Text style={styles.quickTitle} numberOfLines={1}>Categories</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickCard}
             onPress={() => navigation.navigate('Main', { screen: 'Store' })}
+            activeOpacity={0.7}
           >
-            <Text style={styles.quickIcon}>🏪</Text>
-            <Text style={styles.quickTitle}>My Store Catalog</Text>
+            <View style={[styles.quickIconBox, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+              <Text style={styles.quickIcon}>🏪</Text>
+            </View>
+            <Text style={styles.quickTitle} numberOfLines={1}>My Store</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickCard}
             onPress={() => navigation.navigate('Main', { screen: 'Chats' })}
+            activeOpacity={0.7}
           >
-            <Text style={styles.quickIcon}>💬</Text>
-            <Text style={styles.quickTitle}>Direct Chats</Text>
+            <View style={[styles.quickIconBox, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
+              <Text style={styles.quickIcon}>💬</Text>
+            </View>
+            <Text style={styles.quickTitle} numberOfLines={1}>Chats</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickCard}
             onPress={() => navigation.navigate('CallHistory')}
+            activeOpacity={0.7}
           >
-            <Text style={styles.quickIcon}>📞</Text>
-            <Text style={styles.quickTitle}>Call History</Text>
+            <View style={[styles.quickIconBox, { backgroundColor: 'rgba(6, 182, 212, 0.15)' }]}>
+              <Text style={styles.quickIcon}>📞</Text>
+            </View>
+            <Text style={styles.quickTitle} numberOfLines={1}>Calls</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickCard}
             onPress={() => navigation.navigate('Subscription')}
+            activeOpacity={0.7}
           >
-            <Text style={styles.quickIcon}>⚡</Text>
-            <Text style={styles.quickTitle}>Subscription</Text>
+            <View style={[styles.quickIconBox, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+              <Text style={styles.quickIcon}>⚡</Text>
+            </View>
+            <Text style={styles.quickTitle} numberOfLines={1}>Plans</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
 
         {/* Products Showcase Feed */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>🔥 Verified Wholesale Feed</Text>
-          <Text style={styles.sectionSubtitle}>SKU Deduplicated Catalog</Text>
+          <Text style={styles.sectionSubtitle}>[{activeCommunity.toUpperCase()}] Dedicated Catalog</Text>
         </View>
 
         {isProductsLoading ? (
@@ -307,30 +508,45 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
       </ScrollView>
 
       {/* WhatsApp Fullscreen Story Viewer Modal */}
-      <Modal visible={Boolean(activeStoryGroup && currentActiveStory)} animationType="slide" transparent={false} statusBarTranslucent>
+      <Modal
+        visible={Boolean(activeStoryGroup && currentActiveStory)}
+        animationType="slide"
+        transparent={false}
+        statusBarTranslucent
+      >
         {activeStoryGroup && currentActiveStory && (
-          <View style={[
-            styles.storyViewerBg,
-            !currentActiveStory.mediaUrl && {
-              backgroundColor: currentActiveStory.bgColor || '#0f172a'
-            }
-          ]}>
+          <View
+            style={[
+              styles.storyViewerBg,
+              !currentActiveStory.mediaUrl && {
+                backgroundColor: currentActiveStory.bgColor || '#0f172a',
+              },
+            ]}
+          >
             {/* Top Bar Header */}
             <View style={styles.storyHeader}>
-              {/* Segmented Progress Bar for CURRENT STORY GROUP ONLY */}
+              {/* WhatsApp Segmented Animated Progress Bars */}
               <View style={styles.storyProgressRow}>
                 {activeStoryGroup.map((st, i) => (
-                  <View
-                    key={st.id}
-                    style={[
-                      styles.storyProgressBar,
-                      i === activeStoryIndex
-                        ? styles.storyProgressBarActive
-                        : i < activeStoryIndex
-                        ? styles.storyProgressBarPassed
-                        : styles.storyProgressBarUpcoming,
-                    ]}
-                  />
+                  <View key={st.id} style={styles.storyProgressBarBackground}>
+                    {i < activeStoryIndex ? (
+                      <View style={[styles.storyProgressBarFill, { width: '100%' }]} />
+                    ) : i === activeStoryIndex ? (
+                      <Animated.View
+                        style={[
+                          styles.storyProgressBarFill,
+                          {
+                            width: storyProgress.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: ['0%', '100%'],
+                            }),
+                          },
+                        ]}
+                      />
+                    ) : (
+                      <View style={[styles.storyProgressBarFill, { width: '0%' }]} />
+                    )}
+                  </View>
                 ))}
               </View>
 
@@ -343,9 +559,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                     />
                   ) : (
                     <Text style={styles.storyHeaderAvatarText}>
-                      {(currentActiveStory.business?.shopName ||
+                      {(
+                        currentActiveStory.business?.shopName ||
                         currentActiveStory.user?.fullName ||
-                        'U').charAt(0).toUpperCase()}
+                        'U'
+                      )
+                        .charAt(0)
+                        .toUpperCase()}
                     </Text>
                   )}
                 </View>
@@ -360,8 +580,13 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                       const d = new Date(currentActiveStory.createdAt);
                       const now = new Date();
                       const isToday = d.toDateString() === now.toDateString();
-                      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                      return isToday ? `Today, ${timeStr}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${timeStr}`;
+                      const timeStr = d.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      });
+                      return isToday
+                        ? `Today, ${timeStr}`
+                        : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${timeStr}`;
                     })()}{' '}
                     • [{(currentActiveStory.categories?.[0] || 'trade').toUpperCase()}]
                   </Text>
@@ -379,7 +604,10 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                   </TouchableOpacity>
                 )}
 
-                <TouchableOpacity style={styles.storyCloseBtn} onPress={() => setActiveStoryGroup(null)}>
+                <TouchableOpacity
+                  style={styles.storyCloseBtn}
+                  onPress={() => setActiveStoryGroup(null)}
+                >
                   <Text style={styles.storyCloseText}>✕</Text>
                 </TouchableOpacity>
               </View>
@@ -402,10 +630,7 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
               )}
 
               {/* Caption Overlay if Media */}
-              {Boolean(
-                currentActiveStory.mediaUrl &&
-                  currentActiveStory.caption
-              ) && (
+              {Boolean(currentActiveStory.mediaUrl && currentActiveStory.caption) && (
                 <View style={styles.storyCaptionOverlay}>
                   <Text style={styles.storyCaptionText}>
                     {currentActiveStory.caption}
@@ -414,35 +639,21 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
               )}
             </View>
 
-            {/* Tap Navigation Overlays (Left 50%: Prev, Right 50%: Next) */}
-            <View style={styles.storyNavRow}>
+            {/* Tap Navigation Overlays (Left 50%: Prev, Right 50%: Next; Press & hold pauses) */}
+            <View style={styles.storyNavRow} pointerEvents="box-none">
               <TouchableOpacity
                 style={styles.storyNavLeft}
-                onPress={() => {
-                  if (activeStoryIndex > 0) {
-                    const prevIdx = activeStoryIndex - 1;
-                    setActiveStoryIndex(prevIdx);
-                    setShowViewersSheet(false);
-                    if (activeStoryGroup[prevIdx]?.id) {
-                      viewStatus(activeStoryGroup[prevIdx].id);
-                    }
-                  }
-                }}
+                activeOpacity={1}
+                onPress={handlePrevStory}
+                onPressIn={() => setIsPaused(true)}
+                onPressOut={() => setIsPaused(false)}
               />
               <TouchableOpacity
                 style={styles.storyNavRight}
-                onPress={() => {
-                  if (activeStoryIndex < activeStoryGroup.length - 1) {
-                    const nextIdx = activeStoryIndex + 1;
-                    setActiveStoryIndex(nextIdx);
-                    setShowViewersSheet(false);
-                    if (activeStoryGroup[nextIdx]?.id) {
-                      viewStatus(activeStoryGroup[nextIdx].id);
-                    }
-                  } else {
-                    setActiveStoryGroup(null);
-                  }
-                }}
+                activeOpacity={1}
+                onPress={handleNextStory}
+                onPressIn={() => setIsPaused(true)}
+                onPressOut={() => setIsPaused(false)}
               />
             </View>
 
@@ -461,11 +672,12 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                 <View style={styles.storyFooter}>
                   <TouchableOpacity
                     style={styles.storyViewsBtn}
-                    onPress={() => setShowViewersSheet(true)}
+                    onPress={() => {
+                      setIsPaused(true);
+                      setShowViewersSheet(true);
+                    }}
                   >
-                    <Text style={styles.storyViewsText}>
-                      👁️ {frameViewsCount} Views  ▲
-                    </Text>
+                    <Text style={styles.storyViewsText}>👁️ {frameViewsCount} Views  ▲</Text>
                   </TouchableOpacity>
                 </View>
               );
@@ -479,23 +691,30 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
         <TouchableOpacity
           style={styles.viewersModalOverlay}
           activeOpacity={1}
-          onPress={() => setShowViewersSheet(false)}
+          onPress={() => {
+            setShowViewersSheet(false);
+            setIsPaused(false);
+          }}
         >
           <View style={styles.viewersSheetContent}>
             {(() => {
-              const isViewersDataCurrent = currentActiveStory && viewersData?.statusId === currentActiveStory.id;
+              const isViewersDataCurrent =
+                currentActiveStory && viewersData?.statusId === currentActiveStory.id;
               const frameTotalViews = isViewersDataCurrent
                 ? viewersData.totalViews
                 : (currentActiveStory?.views?.length ?? currentActiveStory?.viewsCount ?? 0);
-              const frameViewersList = isViewersDataCurrent ? (viewersData.viewers || []) : [];
+              const frameViewersList = isViewersDataCurrent ? viewersData.viewers || [] : [];
 
               return (
                 <>
                   <View style={styles.viewersHeader}>
-                    <Text style={styles.viewersTitle}>
-                      👁️ Status Viewers ({frameTotalViews})
-                    </Text>
-                    <TouchableOpacity onPress={() => setShowViewersSheet(false)}>
+                    <Text style={styles.viewersTitle}>👁️ Status Viewers ({frameTotalViews})</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setShowViewersSheet(false);
+                        setIsPaused(false);
+                      }}
+                    >
                       <Text style={styles.viewersCloseText}>✕ Close</Text>
                     </TouchableOpacity>
                   </View>
@@ -522,7 +741,10 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
                             <Text style={styles.viewerNameText}>{v.fullName}</Text>
                             <Text style={styles.viewerShopText}>🏢 {v.shopName || 'Verified Vendor'}</Text>
                             <Text style={styles.viewerTimeText}>
-                              {new Date(v.viewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {new Date(v.viewedAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
                             </Text>
                           </View>
 
@@ -556,34 +778,33 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617' },
-  scrollContent: { padding: 16 },
+  scrollContent: { padding: 16, paddingBottom: 40 },
   profileBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#4f46e5',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#3b82f6',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#60a5fa',
   },
-  profileBadgeText: { color: '#ffffff', fontWeight: '900', fontSize: 14 },
+  profileBadgeText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#0f172a',
-    borderRadius: 14,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 48,
     borderWidth: 1,
     borderColor: '#1e293b',
-    paddingHorizontal: 12,
-    marginBottom: 14,
+    marginBottom: 16,
   },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: {
-    flex: 1,
-    height: 44,
-    color: '#ffffff',
-    fontSize: 14,
-  },
+  searchIcon: { fontSize: 18, marginRight: 8 },
+  searchInput: { flex: 1, color: '#ffffff', fontSize: 14 },
   communityBar: { marginBottom: 16 },
+  communityBarContent: { gap: 8 },
   communityPill: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -591,39 +812,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
     borderWidth: 1,
     borderColor: '#1e293b',
-    marginRight: 8,
   },
-  communityPillActive: {
-    backgroundColor: '#4f46e5',
-    borderColor: '#6366f1',
-  },
-  communityText: { color: '#94a3b8', fontSize: 13, fontWeight: '700' },
-  communityTextActive: { color: '#ffffff' },
+  communityPillActive: { backgroundColor: '#4f46e5', borderColor: '#818cf8' },
+  communityText: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
+  communityTextActive: { color: '#ffffff', fontWeight: '800' },
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
+    marginTop: 4,
   },
-  sectionTitle: { color: '#f8fafc', fontSize: 16, fontWeight: '800' },
-  sectionSubtitle: { color: '#64748b', fontSize: 11 },
+  sectionTitle: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  sectionSubtitle: { color: '#64748b', fontSize: 11, fontWeight: '600' },
   sectionAction: { color: '#818cf8', fontSize: 13, fontWeight: '700' },
   statusesBar: { marginBottom: 20 },
-  addStatusCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#0f172a',
-    borderWidth: 2,
-    borderColor: '#334155',
-    borderStyle: 'dashed',
+  statusItem: { alignItems: 'center', marginRight: 14, width: 64 },
+  statusAvatarWrapper: {
+    width: 58,
+    height: 58,
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
   },
-  addStatusPlus: { color: '#818cf8', fontSize: 20, fontWeight: '900' },
-  addStatusLabel: { color: '#94a3b8', fontSize: 9, marginTop: 2 },
-  statusItem: { alignItems: 'center', marginRight: 14, width: 64 },
   statusRing: {
     width: 58,
     height: 58,
@@ -655,20 +866,22 @@ const styles = StyleSheet.create({
   },
   addStatusBadgeBtn: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    bottom: -1,
+    right: -1,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: '#10b981',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: '#020617',
+    zIndex: 10,
+    elevation: 4,
   },
   addStatusBadgeText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '900',
     marginTop: -1,
   },
@@ -679,36 +892,46 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 8,
   },
-  storyProgressBar: {
+  storyProgressBarBackground: {
     flex: 1,
     height: 3,
     borderRadius: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    overflow: 'hidden',
   },
-  storyProgressBarActive: {
-    backgroundColor: '#10b981',
+  storyProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#10b981', // WhatsApp green
+    borderRadius: 2,
   },
-  storyProgressBarPassed: {
-    backgroundColor: '#10b981',
-  },
-  storyProgressBarUpcoming: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  quickGrid: {
-    flexDirection: 'row',
-    gap: 10,
+  quickScroll: {
     marginBottom: 20,
+    marginHorizontal: -16,
+  },
+  quickScrollContent: {
+    paddingHorizontal: 16,
+    gap: 10,
   },
   quickCard: {
-    flex: 1,
+    width: 82,
     backgroundColor: '#0f172a',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#1e293b',
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  quickIcon: { fontSize: 22, marginBottom: 4 },
+  quickIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  quickIcon: { fontSize: 22 },
   quickTitle: { color: '#e2e8f0', fontSize: 11, fontWeight: '700', textAlign: 'center' },
   loadingBox: { padding: 30, alignItems: 'center' },
   loadingText: { color: '#94a3b8', fontSize: 14 },
@@ -853,15 +1076,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  storyPublicBadgeText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-  },
 
   /* Viewers List Modal Styles */
   viewersModalOverlay: {
@@ -970,4 +1184,3 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 });
-

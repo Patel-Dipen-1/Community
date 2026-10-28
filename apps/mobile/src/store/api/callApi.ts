@@ -37,6 +37,13 @@ export interface LogCallRequest {
   livekitRoom?: string;
 }
 
+export interface LiveKitTokenResponse {
+  success: boolean;
+  token: string;
+  wsUrl: string;
+  roomName: string;
+}
+
 export const callApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     getCallHistory: builder.query<CallHistoryResponse, void>({
@@ -51,7 +58,14 @@ export const callApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ['Calls'],
     }),
+    getLiveKitToken: builder.mutation<LiveKitTokenResponse, { roomName: string; participantName?: string }>({
+      query: (body) => ({
+        url: '/chat/livekit-token',
+        method: 'POST',
+        body,
+      }),
+    }),
   }),
 });
 
-export const { useGetCallHistoryQuery, useLogCallMutation } = callApi;
+export const { useGetCallHistoryQuery, useLogCallMutation, useGetLiveKitTokenMutation } = callApi;

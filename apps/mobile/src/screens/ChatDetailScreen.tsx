@@ -1,3 +1,4 @@
+import { uploadMediaFile } from '../services/api/uploadService';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -18,12 +19,23 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
+import { Audio } from 'expo-av';
 import { RootStackParamList } from '../types/navigation.types';
 import { Header } from '../components/common/Header';
-import { useGetMessagesQuery, useSendMessageMutation, useForwardMessageMutation, useToggleReactionMutation, useGetConversationsQuery, useMarkConversationAsReadMutation } from '../store/api/chatApi';
+import {
+  chatApi,
+  useGetMessagesQuery,
+  useSendMessageMutation,
+  useForwardMessageMutation,
+  useToggleReactionMutation,
+  useGetConversationsQuery,
+  useMarkConversationAsReadMutation,
+  useEditMessageMutation,
+  useDeleteMessageMutation,
+} from '../store/api/chatApi';
 import { useGetMyStoreQuery, useGetStoreByIdQuery } from '../store/api/storeApi';
 import { socketService } from '../services/socket/socketService';
-import { useAppSelector } from '../hooks/useRedux';
+import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
 import { colors, spacing, borderRadius } from '../theme/theme';
 import { ENV_CONFIG } from '../constants/config';
 
@@ -32,6 +44,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ChatDetail'>;
 export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { conversationId, recipientId, recipientName } = route.params;
   const { user, token } = useAppSelector((state) => state.auth);
+  const dispatch = useAppDispatch();
 
   const [activeConvId, setActiveConvId] = useState<string | undefined>(conversationId);
   const [messageText, setMessageText] = useState('');
@@ -47,6 +60,20 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const [forwardingMessage, setForwardingMessage] = useState<any | null>(null);
   const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+
+  // BUG-008: Real-time Presence Tracking
+  const [presenceStatus, setPresenceStatus] = useState<'ONLINE' | 'OFFLINE'>('OFFLINE');
+  const [lastSeen, setLastSeen] = useState<string | null>(null);
+
+  // BUG-006: Typing Indicator State
+  const [isRecipientTyping, setIsRecipientTyping] = useState(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
+
+  // BUG-007: Edit Message State
+  const [editingMessage, setEditingMessage] = useState<any | null>(null);
 
   const handleScrollToQuotedMessage = (quoteContentSnippet: string) => {
     if (!quoteContentSnippet) return;
@@ -72,7 +99,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     setAttachmentModalVisible(false);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         quality: 0.8,
       });
       if (!result.canceled && result.assets[0]?.uri) {
@@ -87,7 +114,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     setAttachmentModalVisible(false);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        mediaTypes: ['videos'],
         quality: 0.8,
       });
       if (!result.canceled && result.assets[0]?.uri) {
@@ -101,46 +128,68 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const uploadAndSendMedia = async (asset: any, defaultCaption: string) => {
     try {
       setUploadingMedia(true);
-      const formData = new FormData();
-      formData.append('file', {
-        uri: asset.uri,
-        name: asset.fileName || `media_${Date.now()}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
-        type: asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg'),
-      } as any);
-
-      const uploadRes = await fetch(`${ENV_CONFIG.API_BASE_URL}/upload/single`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      const rawText = await uploadRes.text();
-      let uploadData: any = {};
-      try {
-        uploadData = JSON.parse(rawText);
-      } catch (e) {
-        console.warn('Upload response non-JSON text:', rawText);
-      }
-      const mediaUrl = uploadData.url || uploadData.file?.url || asset.uri;
+      const mediaUrl = await uploadMediaFile(
+        asset.uri,
+        asset.fileName || `media_${Date.now()}.${asset.type === 'video' ? 'mp4' : 'jpg'}`,
+        asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg')
+      );
       setUploadingMedia(false);
       await handleSendText(defaultCaption, undefined, mediaUrl);
     } catch (err) {
       setUploadingMedia(false);
-      await handleSendText(defaultCaption, undefined, asset.uri);
+      Alert.alert('Upload Failed', 'Could not upload media attachment. Please check your network and try again.');
     }
   };
 
-  const handleStartVoiceRecording = () => {
-    setAttachmentModalVisible(false);
-    setIsRecordingVoice(true);
-    setVoiceSecs(0);
-    timerRef.current = setInterval(() => {
-      setVoiceSecs((prev) => prev + 1);
-    }, 1000);
+  // Cleanup sounds and recordings on unmount
+  useEffect(() => {
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.unloadAsync().catch(() => {});
+      }
+      if (recordingRef.current) {
+        recordingRef.current.stopAndUnloadAsync().catch(() => {});
+      }
+    };
+  }, []);
+
+  // BUG-009: Real Voice Note Recording via expo-av
+  const handleStartVoiceRecording = async () => {
+    try {
+      setAttachmentModalVisible(false);
+      const perm = await Audio.requestPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Microphone Permission', 'Microphone access is required to record voice notes.');
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recordingRef.current = recording;
+      setIsRecordingVoice(true);
+      setVoiceSecs(0);
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = setInterval(() => {
+        setVoiceSecs((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.warn('Voice recording start error:', err);
+      Alert.alert('Recording Error', err?.message || 'Could not start voice recording.');
+    }
   };
 
-  const handleCancelVoiceRecording = () => {
+  const handleCancelVoiceRecording = async () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    try {
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+        recordingRef.current = null;
+      }
+    } catch (e) {}
     setIsRecordingVoice(false);
     setVoiceSecs(0);
   };
@@ -151,11 +200,86 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     setIsRecordingVoice(false);
     setVoiceSecs(0);
 
+    let uri: string | null = null;
+    try {
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+        uri = recordingRef.current.getURI();
+        recordingRef.current = null;
+      }
+    } catch (e) {
+      console.warn('Error stopping voice recording:', e);
+    }
+
+    if (!uri) {
+      Alert.alert('Voice Note', 'No audio was recorded.');
+      return;
+    }
+
     const mins = Math.floor(duration / 60);
     const secs = duration % 60;
     const durLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
-    const dummyAudioUrl = 'https://actions.google.com/sounds/v1/ambiences/rain_heavy.ogg';
-    await handleSendText(`🎙️ Voice Note (${durLabel})`, undefined, dummyAudioUrl);
+
+    try {
+      setUploadingMedia(true);
+      const fileName = `voice_${Date.now()}.m4a`;
+      const uploadedUrl = await uploadMediaFile(uri, fileName, 'audio/m4a');
+      setUploadingMedia(false);
+      await handleSendText(`🎙️ Voice Note (${durLabel})`, undefined, uploadedUrl);
+    } catch (err) {
+      setUploadingMedia(false);
+      Alert.alert('Voice Note Failed', 'Could not upload voice note. Please try again.');
+    }
+  };
+
+  // BUG-009: Real Voice Note Playback via expo-av
+  const handleTogglePlayAudio = async (messageId: string, audioUrl?: string) => {
+    try {
+      if (playingAudioId === messageId) {
+        if (soundRef.current) {
+          await soundRef.current.stopAsync();
+          await soundRef.current.unloadAsync();
+          soundRef.current = null;
+        }
+        setPlayingAudioId(null);
+        return;
+      }
+
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+
+      if (!audioUrl) {
+        Alert.alert('Audio Unavailable', 'No audio file found for this message.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: audioUrl },
+        { shouldPlay: true }
+      );
+      soundRef.current = sound;
+      setPlayingAudioId(messageId);
+
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setPlayingAudioId(null);
+          sound.unloadAsync().catch(() => {});
+          soundRef.current = null;
+        }
+      });
+    } catch (err: any) {
+      console.warn('Voice playback error:', err);
+      Alert.alert('Playback Error', 'Could not play voice note.');
+      setPlayingAudioId(null);
+    }
   };
   const [quickCatalogVisible, setQuickCatalogVisible] = useState(false);
   const [participantModalVisible, setParticipantModalVisible] = useState(false);
@@ -175,6 +299,8 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   });
 
   const [sendMessage, { isLoading: isSending }] = useSendMessageMutation();
+  const [editMessageMutation] = useEditMessageMutation();
+  const [deleteMessageMutation] = useDeleteMessageMutation();
   const [forwardMessageMutation, { isLoading: isForwardingMsg }] = useForwardMessageMutation();
   const [toggleReaction] = useToggleReactionMutation();
   const [selectedForwardTargets, setSelectedForwardTargets] = useState<string[]>([]);
@@ -189,35 +315,193 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   useEffect(() => {
     socketService.connect();
-    socketService.on('message:new', (msg) => {
-      if (msg.conversationId === activeConvId || msg.senderId === recipientId) {
-        refetch();
-      }
-    });
-    socketService.on('receive_message', (msg) => {
-      if (msg.conversationId === activeConvId || msg.senderId === recipientId) {
-        refetch();
-      }
-    });
-    socketService.on('message_status_update', (data: any) => {
-      if (data?.conversationId === activeConvId) {
-        refetch();
-      }
-    });
     if (activeConvId) {
+      socketService.joinConversation(activeConvId);
+      // BUG-005: Acknowledge delivery of existing messages when viewing conversation
+      socketService.emit('mark_delivered', { conversationId: activeConvId });
       socketService.emit('mark_read', { conversationId: activeConvId });
     }
 
-    return () => {
-      socketService.off('message:new');
-      socketService.off('receive_message');
-      socketService.off('message_status_update');
+    // BUG-008: Request current presence for chat partner
+    if (recipientId) {
+      socketService.emit('get_user_presence', recipientId);
+    }
+
+    const handleReceiveMessage = (msg: any) => {
+      if (msg.conversationId === activeConvId || msg.senderId === recipientId) {
+        if (activeConvId) {
+          dispatch(
+            chatApi.util.updateQueryData('getMessages', { conversationId: activeConvId } as any, (draft: any) => {
+              const exists = draft.messages?.some(
+                (m: any) => m.id === msg.id || (m.clientMessageId && m.clientMessageId === msg.clientMessageId)
+              );
+              if (!exists) {
+                if (!draft.messages) draft.messages = [];
+                draft.messages.push(msg);
+              }
+            })
+          );
+          // BUG-005: Auto emit mark_delivered when new message arrives on active screen
+          socketService.emit('mark_delivered', { conversationId: activeConvId });
+        }
+      }
     };
-  }, [activeConvId, recipientId]);
+
+    const handleStatusUpdate = (data: any) => {
+      if (data?.conversationId === activeConvId && activeConvId) {
+        dispatch(
+          chatApi.util.updateQueryData('getMessages', { conversationId: activeConvId } as any, (draft: any) => {
+            draft.messages?.forEach((m: any) => {
+              if (data.status === 'READ') {
+                if (!data.readBy || m.senderId !== data.readBy) {
+                  m.status = 'READ';
+                }
+              } else if (data.status === 'DELIVERED') {
+                if (m.status !== 'READ') {
+                  m.status = 'DELIVERED';
+                }
+              }
+            });
+          })
+        );
+      }
+    };
+
+    // BUG-006: Real-time typing indicators
+    const handleUserTyping = (data: any) => {
+      if (data?.conversationId === activeConvId && data?.userId !== user?.id) {
+        setIsRecipientTyping(Boolean(data.isTyping));
+      }
+    };
+
+    // BUG-007: Real-time edit and delete updates
+    const handleMessageEdited = (updatedMsg: any) => {
+      if (updatedMsg?.conversationId === activeConvId && activeConvId) {
+        dispatch(
+          chatApi.util.updateQueryData('getMessages', { conversationId: activeConvId } as any, (draft: any) => {
+            const target = draft.messages?.find((m: any) => m.id === updatedMsg.id);
+            if (target) {
+              target.text = updatedMsg.text;
+              target.isEdited = true;
+            }
+          })
+        );
+      }
+    };
+
+    const handleMessageDeleted = (deletedMsg: any) => {
+      if (deletedMsg?.conversationId === activeConvId && activeConvId) {
+        dispatch(
+          chatApi.util.updateQueryData('getMessages', { conversationId: activeConvId } as any, (draft: any) => {
+            const target = draft.messages?.find((m: any) => m.id === deletedMsg.id);
+            if (target) {
+              target.isDeleted = true;
+              target.text = '🚫 This message was deleted';
+            }
+          })
+        );
+      }
+    };
+
+    // BUG-032: Real-time message reaction updates
+    const handleMessageReactionUpdated = (updatedMsg: any) => {
+      if (updatedMsg?.conversationId === activeConvId && activeConvId) {
+        dispatch(
+          chatApi.util.updateQueryData('getMessages', { conversationId: activeConvId } as any, (draft: any) => {
+            const target = draft.messages?.find((m: any) => m.id === updatedMsg.id);
+            if (target) {
+              target.reactions = updatedMsg.reactions;
+            }
+          })
+        );
+      }
+    };
+
+    // BUG-008: Presence tracking events
+    const handlePresenceChange = (data: { userId: string; status: 'ONLINE' | 'OFFLINE'; lastSeen?: string | null }) => {
+      if (data?.userId === recipientId) {
+        setPresenceStatus(data.status);
+        if (data.lastSeen) setLastSeen(data.lastSeen);
+      }
+    };
+
+    const handlePresenceStatus = (data: { userId: string; status: 'ONLINE' | 'OFFLINE'; lastSeen?: string | null }) => {
+      if (data?.userId === recipientId) {
+        setPresenceStatus(data.status);
+        if (data.lastSeen) setLastSeen(data.lastSeen);
+      }
+    };
+
+    socketService.on('receive_message', handleReceiveMessage);
+    socketService.on('message_status_update', handleStatusUpdate);
+    socketService.on('user_typing', handleUserTyping);
+    socketService.on('message_edited', handleMessageEdited);
+    socketService.on('message_deleted', handleMessageDeleted);
+    socketService.on('message_reaction_updated', handleMessageReactionUpdated);
+    socketService.on('user_presence_change', handlePresenceChange);
+    socketService.on('user_presence_status', handlePresenceStatus);
+
+    return () => {
+      socketService.off('receive_message', handleReceiveMessage);
+      socketService.off('message_status_update', handleStatusUpdate);
+      socketService.off('user_typing', handleUserTyping);
+      socketService.off('message_edited', handleMessageEdited);
+      socketService.off('message_deleted', handleMessageDeleted);
+      socketService.off('message_reaction_updated', handleMessageReactionUpdated);
+      socketService.off('user_presence_change', handlePresenceChange);
+      socketService.off('user_presence_status', handlePresenceStatus);
+      if (activeConvId) {
+        socketService.leaveConversation(activeConvId);
+      }
+    };
+  }, [activeConvId, recipientId, user?.id, dispatch]);
+
+  // BUG-006: Typing emission with 2-second debounce
+  const handleMessageTextChange = (newText: string) => {
+    setMessageText(newText);
+    if (!activeConvId) return;
+
+    if (!isTypingRef.current && newText.length > 0) {
+      isTypingRef.current = true;
+      socketService.emit('typing_start', {
+        conversationId: activeConvId,
+        userName: user?.fullName || 'User',
+      });
+    }
+
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {
+      if (isTypingRef.current) {
+        isTypingRef.current = false;
+        socketService.emit('typing_stop', { conversationId: activeConvId });
+      }
+    }, 2000);
+  };
 
   const handleSendText = async (customText?: string, customProductCode?: string, customMediaUrl?: string) => {
     let textToSend = customText ?? messageText.trim();
     if (!textToSend && !customProductCode && !customMediaUrl) return;
+
+    // Stop typing state immediately upon sending
+    if (isTypingRef.current && activeConvId) {
+      isTypingRef.current = false;
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      socketService.emit('typing_stop', { conversationId: activeConvId });
+    }
+
+    // BUG-007: Handle editing existing message
+    if (editingMessage) {
+      const targetId = editingMessage.id;
+      setEditingMessage(null);
+      setMessageText('');
+      try {
+        await editMessageMutation({ messageId: targetId, text: textToSend }).unwrap();
+        refetch();
+      } catch (err: any) {
+        Alert.alert('Edit Failed', err?.data?.error || err?.message || 'Unable to edit message.');
+      }
+      return;
+    }
 
     const currentReplyId = replyingToMessage?.id;
     if (replyingToMessage) {
@@ -294,7 +578,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const handlePickAttachment = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        mediaTypes: ['images', 'videos'],
         quality: 0.8,
       });
 
@@ -317,7 +601,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         });
 
         const uploadData = await uploadRes.json();
-        const mediaUrl = uploadData.url || uploadData.file?.url || asset.uri;
+        const mediaUrl = uploadData.url || uploadData.file?.url;
+        if (!mediaUrl) {
+          throw new Error('Upload returned no URL');
+        }
         setUploadingMedia(false);
         await handleSendText('📷 Media Attachment', undefined, mediaUrl);
       }
@@ -381,6 +668,52 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               <Text style={styles.selectedHeaderActionIcon}>↩️ Reply</Text>
             </TouchableOpacity>
 
+            {/* BUG-007: Edit Own Message */}
+            {selectedMsgActions.senderId === user?.id && !selectedMsgActions.isDeleted && Boolean(selectedMsgActions.text) && (
+              <TouchableOpacity
+                style={styles.selectedHeaderActionBtn}
+                onPress={() => {
+                  setEditingMessage(selectedMsgActions);
+                  setMessageText(selectedMsgActions.text || '');
+                  setSelectedMsgActions(null);
+                }}
+              >
+                <Text style={styles.selectedHeaderActionIcon}>✏️ Edit</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* BUG-007: Delete Own Message */}
+            {selectedMsgActions.senderId === user?.id && !selectedMsgActions.isDeleted && (
+              <TouchableOpacity
+                style={styles.selectedHeaderActionBtn}
+                onPress={() => {
+                  const targetMsgId = selectedMsgActions.id;
+                  setSelectedMsgActions(null);
+                  Alert.alert(
+                    'Delete Message',
+                    'Are you sure you want to delete this message for everyone?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await deleteMessageMutation(targetMsgId).unwrap();
+                            refetch();
+                          } catch (err: any) {
+                            Alert.alert('Delete Failed', err?.data?.error || 'Unable to delete message.');
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.selectedHeaderActionIcon}>🗑️ Delete</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               style={styles.selectedHeaderActionBtn}
               onPress={() => {
@@ -395,11 +728,31 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             <TouchableOpacity
               style={styles.selectedHeaderActionBtn}
               onPress={() => {
+                toggleReaction({ messageId: selectedMsgActions.id, emoji: '👍' });
+                setSelectedMsgActions(null);
+              }}
+            >
+              <Text style={styles.selectedHeaderActionIcon}>👍</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.selectedHeaderActionBtn}
+              onPress={() => {
                 toggleReaction({ messageId: selectedMsgActions.id, emoji: '❤️' });
                 setSelectedMsgActions(null);
               }}
             >
               <Text style={styles.selectedHeaderActionIcon}>❤️</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.selectedHeaderActionBtn}
+              onPress={() => {
+                toggleReaction({ messageId: selectedMsgActions.id, emoji: '🔥' });
+                setSelectedMsgActions(null);
+              }}
+            >
+              <Text style={styles.selectedHeaderActionIcon}>🔥</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -413,7 +766,15 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       ) : (
         <Header
           title={recipientName || participantBusiness?.shopName || 'Direct Chat'}
-          subtitle="Tap for Profile & Catalog • Online"
+          subtitle={
+            isRecipientTyping
+              ? '✍️ typing...'
+              : presenceStatus === 'ONLINE'
+              ? '🟢 Online'
+              : lastSeen
+              ? `Last seen ${new Date(lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+              : '⚪ Offline'
+          }
           showBack
           onBack={() => navigation.goBack()}
           onTitlePress={() => setParticipantModalVisible(true)}
@@ -536,11 +897,11 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   )}
 
                   {/* Voice Note Bubble */}
-                  {item.text?.includes('🎙️ Voice Note') || item.mediaUrl?.includes('.ogg') || item.mediaUrl?.includes('.mp3') ? (
+                  {item.text?.includes('🎙️ Voice Note') || item.mediaUrl?.includes('.ogg') || item.mediaUrl?.includes('.mp3') || item.mediaUrl?.includes('.m4a') || item.mediaUrl?.includes('.wav') || item.mediaUrl?.includes('.aac') ? (
                     <View style={styles.voiceNoteBubbleCard}>
                       <TouchableOpacity
                         style={styles.voicePlayBtn}
-                        onPress={() => setPlayingAudioId(playingAudioId === item.id ? null : item.id)}
+                        onPress={() => handleTogglePlayAudio(item.id, item.mediaUrl)}
                       >
                         <Text style={styles.voicePlayIcon}>{playingAudioId === item.id ? '⏸️' : '▶️'}</Text>
                       </TouchableOpacity>
@@ -548,7 +909,7 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                         <Text style={styles.voiceWaveformLine}>
                           {playingAudioId === item.id ? '❚❙❘❙❚❙❚❙❘❙❚❙❘❙❚❙❚' : '||||||||||||||||||||'}
                         </Text>
-                        <Text style={styles.voiceMetaSub}>🎙️ Voice Note • 0:15</Text>
+                        <Text style={styles.voiceMetaSub}>{item.text || '🎙️ Voice Note'}</Text>
                       </View>
                     </View>
                   ) : item.text?.includes('🎥 Video') || item.mediaUrl?.includes('.mp4') ? (
@@ -575,17 +936,29 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                     </TouchableOpacity>
                   ) : null}
 
-                  {Boolean(mainMessageText) && !item.text?.includes('🎙️ Voice Note') && (
-                    <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
-                      {mainMessageText}
+                  {/* BUG-007: Deleted message indicator */}
+                  {item.isDeleted ? (
+                    <Text style={[styles.messageText, { fontStyle: 'italic', color: '#94a3b8' }]}>
+                      🚫 This message was deleted
                     </Text>
+                  ) : (
+                    Boolean(mainMessageText) && !item.text?.includes('🎙️ Voice Note') && (
+                      <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
+                        {mainMessageText}
+                      </Text>
+                    )
                   )}
 
                   <View style={styles.timeRow}>
                     <Text style={styles.timeText}>
                       {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </Text>
-                    {isMe && (
+                    {item.isEdited && !item.isDeleted && (
+                      <Text style={[styles.timeText, { fontStyle: 'italic', marginLeft: 4, color: '#94a3b8' }]}>
+                        (edited)
+                      </Text>
+                    )}
+                    {isMe && !item.isDeleted && (
                       <Text style={[styles.statusTick, item.status === 'READ' && { color: '#0284c7', fontWeight: 'bold' }]}>
                         {item.status === 'PENDING'
                           ? '🕒'
@@ -599,6 +972,21 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                       </Text>
                     )}
                   </View>
+
+                  {/* BUG-032: Real-time message reactions badge list */}
+                  {Array.isArray(item.reactions) && item.reactions.length > 0 && (
+                    <View style={styles.reactionBadgeRow}>
+                      {(Array.from(new Set(item.reactions.map((r: any) => r.emoji))) as string[]).map((emoji, eIdx) => {
+                        const count = item.reactions?.filter((r: any) => r.emoji === emoji).length || 0;
+                        return (
+                          <View key={eIdx} style={styles.reactionPill}>
+                            <Text style={styles.reactionEmojiText}>{String(emoji)}</Text>
+                            {count > 1 && <Text style={styles.reactionCountText}>{count}</Text>}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
                 </TouchableOpacity>
 
                 {/* Outer Media Quick Forward Arrow Button (➦) */}
@@ -656,6 +1044,28 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         )}
 
+        {/* BUG-007: WhatsApp Edit Message Preview Banner */}
+        {editingMessage && !isRecordingVoice && (
+          <View style={[styles.replyPreviewBanner, { borderLeftColor: '#38bdf8' }]}>
+            <View style={[styles.replyPreviewAccentBar, { backgroundColor: '#38bdf8' }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.replyPreviewSender, { color: '#38bdf8' }]}>✏️ Editing Message</Text>
+              <Text style={styles.replyPreviewText} numberOfLines={1}>
+                {editingMessage.text}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                setEditingMessage(null);
+                setMessageText('');
+              }}
+              style={styles.replyPreviewCloseBtn}
+            >
+              <Text style={styles.replyPreviewCloseText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Input Bar or Voice Recorder Bar */}
         {isRecordingVoice ? (
           <View style={styles.voiceRecordingBar}>
@@ -682,10 +1092,10 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
             <TextInput
               style={styles.input}
-              placeholder={replyingToMessage ? "Type your reply..." : "Message"}
+              placeholder={editingMessage ? "Edit message..." : replyingToMessage ? "Type your reply..." : "Message"}
               placeholderTextColor="#94a3b8"
               value={messageText}
-              onChangeText={setMessageText}
+              onChangeText={handleMessageTextChange}
               multiline
             />
 
@@ -1911,5 +2321,32 @@ const styles = StyleSheet.create({
   recentMediaRow: { gap: 8, paddingHorizontal: 4 },
   recentThumbBox: { width: 68, height: 68, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#334155' },
   recentThumbImg: { width: '100%', height: '100%' },
+
+  // BUG-032: Message Reaction Pill Styles
+  reactionBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  reactionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  reactionEmojiText: {
+    fontSize: 12,
+  },
+  reactionCountText: {
+    color: '#cbd5e1',
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 3,
+  },
 });
 

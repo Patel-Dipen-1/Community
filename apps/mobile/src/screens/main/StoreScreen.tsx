@@ -1,3 +1,4 @@
+import { uploadMediaFile } from '../../services/api/uploadService';
 import React, { useState } from 'react';
 import {
   View,
@@ -37,28 +38,7 @@ const { width } = Dimensions.get('window');
  */
 const uploadLocalImage = async (localUri: string): Promise<string> => {
   try {
-    const formData = new FormData();
-    const filename = localUri.split('/').pop() || 'upload.jpg';
-    const match = /\.(\w+)$/.exec(filename);
-    const type = match ? `image/${match[1]}` : 'image/jpeg';
-
-    formData.append('file', {
-      uri: localUri,
-      name: filename,
-      type,
-    } as any);
-
-    const token = await authStorage.getToken();
-    const response = await fetch(`${ENV_CONFIG.API_BASE_URL}/upload/single`, {
-      method: 'POST',
-      headers: {
-        Authorization: token ? `Bearer ${token}` : '',
-      },
-      body: formData,
-    });
-
-    const data = await response.json();
-    return data.url || localUri;
+    return await uploadMediaFile(localUri);
   } catch (err) {
     console.log('Image upload network fallback to local URI:', err);
     return localUri;
@@ -163,7 +143,7 @@ export const StoreScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
       });

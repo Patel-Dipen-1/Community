@@ -11,9 +11,13 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MainTabParamList, RootStackParamList } from '../../types/navigation.types';
 import { Header } from '../../components/common/Header';
 import { EmptyState } from '../../components/common/EmptyState';
@@ -31,9 +35,10 @@ import { CreateBroadcastModal } from '../../components/CreateBroadcastModal';
 type Props = NativeStackScreenProps<MainTabParamList & RootStackParamList, 'Chats'>;
 
 export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'all' | 'direct' | 'groups' | 'broadcasts'>('all');
   const [searchFilter, setSearchFilter] = useState('');
-  
+
   // Modals visibility state
   const [isStartChatModalVisible, setIsStartChatModalVisible] = useState(false);
   const [isCreateGroupModalVisible, setIsCreateGroupModalVisible] = useState(false);
@@ -62,6 +67,11 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
 
   const [refreshing, setRefreshing] = useState(false);
 
+  // BUG-017: Cross-platform Broadcast Dispatch Modal (replaces iOS-only Alert.prompt)
+  const [dispatchModalVisible, setDispatchModalVisible] = useState(false);
+  const [selectedBroadcastItem, setSelectedBroadcastItem] = useState<any | null>(null);
+  const [broadcastDispatchText, setBroadcastDispatchText] = useState('');
+
   // Auto refetch conversations, groups & broadcasts whenever screen gets focus
   useFocusEffect(
     useCallback(() => {
@@ -73,11 +83,6 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
 
   useEffect(() => {
     socketService.connect();
-    socketService.on('message:new', () => {
-      refetchConversations();
-      refetchGroups();
-      refetchBroadcasts();
-    });
     socketService.on('receive_message', () => {
       refetchConversations();
       refetchGroups();
@@ -85,7 +90,6 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
     });
 
     return () => {
-      socketService.off('message:new');
       socketService.off('receive_message');
     };
   }, [refetchConversations, refetchGroups, refetchBroadcasts]);
@@ -121,30 +125,26 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const handleDispatchPrompt = (item: any) => {
-    Alert.prompt(
-      `📢 Dispatch to ${item.title}`,
-      `Type your announcement to send 1-to-1 to all ${item.recipientsCount || item.recipients?.length || 0} contact(s):`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Dispatch 🚀',
-          onPress: async (msgText?: string) => {
-            if (!msgText || !msgText.trim()) return;
-            try {
-              const res = await sendBroadcast({
-                id: item.id,
-                text: msgText.trim(),
-              }).unwrap();
+    setSelectedBroadcastItem(item);
+    setBroadcastDispatchText('');
+    setDispatchModalVisible(true);
+  };
 
-              Alert.alert('Broadcast Sent! 🎉', res.message || `Dispatched to ${res.dispatchedCount} recipient(s).`);
-            } catch (err: any) {
-              Alert.alert('Dispatch Error', err?.data?.error || err?.message || 'Failed to dispatch broadcast message.');
-            }
-          },
-        },
-      ],
-      'plain-text'
-    );
+  const handleConfirmDispatch = async () => {
+    if (!selectedBroadcastItem || !broadcastDispatchText.trim()) return;
+    try {
+      const res = await sendBroadcast({
+        id: selectedBroadcastItem.id,
+        text: broadcastDispatchText.trim(),
+      }).unwrap();
+
+      setDispatchModalVisible(false);
+      setSelectedBroadcastItem(null);
+      setBroadcastDispatchText('');
+      Alert.alert('Broadcast Sent! 🎉', res.message || `Dispatched to ${res.dispatchedCount} recipient(s).`);
+    } catch (err: any) {
+      Alert.alert('Dispatch Error', err?.data?.error || err?.message || 'Failed to dispatch broadcast message.');
+    }
   };
 
   const rawConversations = convData?.conversations || [];
@@ -227,97 +227,119 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <Header
-        title="Messages & Broadcasts"
-        subtitle="Real-time WhatsApp-style B2B Communication"
+        title="Messages & Groups"
+        subtitle="WhatsApp-Style B2B Network"
         rightElement={
           <View style={styles.headerRightRow}>
             <TouchableOpacity
-              style={styles.headerBtn}
+              style={[styles.headerActionBtn, { backgroundColor: '#064e3b', borderColor: '#059669' }]}
               onPress={() => setIsCreateGroupModalVisible(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="New Group"
             >
-              <Text style={styles.headerBtnText}>👥 New Group</Text>
+              <Text style={styles.headerActionIcon}>👥</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.headerBtnSecondary}
+              style={[styles.headerActionBtn, { backgroundColor: '#831843', borderColor: '#db2777' }]}
               onPress={() => setIsCreateBroadcastModalVisible(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="New Broadcast"
             >
-              <Text style={styles.headerBtnSecondaryText}>📢 Broadcast</Text>
+              <Text style={styles.headerActionIcon}>📢</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.newChatHeaderBtn}
+              style={[styles.headerActionBtn, { backgroundColor: '#312e81', borderColor: '#6366f1' }]}
               onPress={() => setIsStartChatModalVisible(true)}
+              activeOpacity={0.7}
+              accessibilityLabel="Search Phone Contact"
             >
-              <Text style={styles.newChatHeaderBtnText}>📱 Search</Text>
+              <Text style={styles.headerActionIcon}>🔍</Text>
             </TouchableOpacity>
           </View>
         }
       />
 
-      {/* Quick Phone Number & Contact Search Bar */}
+      {/* Quick Search Bar */}
       <View style={styles.searchBarContainer}>
         <View style={styles.searchInputWrapper}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search chats, phone number, groups, or broadcasts..."
+            placeholder="Search chats, phone, groups..."
             placeholderTextColor="#64748b"
             value={searchFilter}
             onChangeText={setSearchFilter}
+            returnKeyType="search"
           />
-          {searchFilter.length > 0 ? (
-            <TouchableOpacity onPress={() => setSearchFilter('')} style={styles.clearSearchBtn}>
+          {searchFilter.trim().length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setSearchFilter('')}
+              style={styles.clearSearchBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Text style={styles.clearSearchText}>✕</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               style={styles.startChatQuickBtn}
               onPress={() => setIsActionMenuVisible(true)}
+              activeOpacity={0.8}
             >
-              <Text style={styles.startChatQuickText}>+ Create</Text>
+              <Text style={styles.startChatQuickText}>+ New</Text>
             </TouchableOpacity>
           )}
         </View>
       </View>
 
-      {/* WhatsApp-Style 4-Segmented Tab Switcher */}
+      {/* Modern Responsive Horizontal Filter Chips */}
       <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'all' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('all')}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabScrollContent}
         >
-          <Text style={[styles.tabText, activeTab === 'all' && styles.tabTextActive]}>
-            💬 All ({displayFeed.length})
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'all' && styles.tabBtnActive]}
+            onPress={() => setActiveTab('all')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.tabText, activeTab === 'all' && styles.tabTextActive]}>
+              💬 All ({displayFeed.length})
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'direct' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('direct')}
-        >
-          <Text style={[styles.tabText, activeTab === 'direct' && styles.tabTextActive]}>
-            📱 Direct {totalUnreadCount > 0 ? `(${totalUnreadCount})` : ''}
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'direct' && styles.tabBtnActive]}
+            onPress={() => setActiveTab('direct')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.tabText, activeTab === 'direct' && styles.tabTextActive]}>
+              📱 Direct {totalUnreadCount > 0 ? `(${totalUnreadCount})` : ''}
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'groups' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('groups')}
-        >
-          <Text style={[styles.tabText, activeTab === 'groups' && styles.tabTextActive]}>
-            👥 Groups ({filteredGroups.length})
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'groups' && styles.tabBtnActive]}
+            onPress={() => setActiveTab('groups')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.tabText, activeTab === 'groups' && styles.tabTextActive]}>
+              👥 Groups ({filteredGroups.length})
+            </Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'broadcasts' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('broadcasts')}
-        >
-          <Text style={[styles.tabText, activeTab === 'broadcasts' && styles.tabTextActive]}>
-            📢 Lists ({filteredBroadcasts.length})
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, activeTab === 'broadcasts' && styles.tabBtnActive]}
+            onPress={() => setActiveTab('broadcasts')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.tabText, activeTab === 'broadcasts' && styles.tabTextActive]}>
+              📢 Lists ({filteredBroadcasts.length})
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {/* Main Unified WhatsApp-Style Chat List */}
@@ -326,6 +348,9 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
         keyExtractor={(item, index) =>
           `${item.feedType}-${item.conversationId || item.id || index}`
         }
+        contentContainerStyle={styles.listContent}
+        ItemSeparatorComponent={() => <View style={styles.itemSeparator} />}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#818cf8" />
         }
@@ -335,16 +360,29 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
           ) : (
             <EmptyState
               icon="💬"
-              title={searchFilter ? "No Matching Chats Found" : "No Conversations Yet"}
+              title={searchFilter ? 'No Matching Chats Found' : 'No Conversations Yet'}
               description={
                 searchFilter
                   ? `No chats, groups or broadcasts matched "${searchFilter}".`
-                  : "Start inquiring on products, create trade groups, or search phone numbers to start messaging."
+                  : 'Start inquiring on products, create trade groups, or search phone numbers to start messaging.'
               }
-              actionTitle="📱 Search Phone Number"
+              actionTitle="🔍 Search Phone Number"
               onAction={() => setIsStartChatModalVisible(true)}
             />
           )
+        }
+        ListFooterComponent={
+          displayFeed.length > 0 && displayFeed.length <= 4 ? (
+            <View style={styles.discoveryCard}>
+              <View style={styles.discoveryHeader}>
+                <Text style={styles.discoveryIcon}>💡</Text>
+                <Text style={styles.discoveryTitle}>B2B Network Pro Tip</Text>
+              </View>
+              <Text style={styles.discoverySubtitle}>
+                Connect directly with verified suppliers & buyers across clothing, jewellery, electronics, and hardware. Tap "+ New" to search 10-digit mobile numbers or start trade groups.
+              </Text>
+            </View>
+          ) : null
         }
         renderItem={({ item }) => {
           // RENDER 1: DIRECT CHAT CARD
@@ -362,7 +400,7 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
             return (
               <TouchableOpacity
                 style={styles.chatCard}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
                 onPress={() =>
                   navigation.navigate('ChatDetail', {
                     conversationId: convId,
@@ -389,7 +427,9 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
                       {recipientName}
                     </Text>
                     <Text style={styles.timeText}>
-                      {lastMsg?.createdAt ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                      {lastMsg?.createdAt
+                        ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : ''}
                     </Text>
                   </View>
 
@@ -399,32 +439,38 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
                         <Text style={styles.phoneTagText}>📱 {mobileNumber}</Text>
                       </View>
                     ) : null}
-                    <Text style={styles.cityText} numberOfLines={1}>
-                      {participant?.city || participant?.business?.city ? `📍 ${participant?.city || participant?.business?.city}` : 'Verified Contact'}
+                    {participant?.city || (participant?.business as any)?.city ? (
+                      <Text style={styles.cityText} numberOfLines={1}>
+                        📍 {participant?.city || (participant?.business as any)?.city}
+                      </Text>
+                    ) : (
+                      <Text style={styles.cityText}>Verified Contact</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.chatSnippetRow}>
+                    <Text style={styles.snippetText} numberOfLines={1}>
+                      {lastMsg?.type === 'IMAGE' || (lastMsg?.mediaUrl && !lastMsg?.text)
+                        ? '📷 Photo'
+                        : lastMsg?.text || 'Tap to open conversation...'}
                     </Text>
+                    {unreadCount > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadBadgeCount}>{unreadCount}</Text>
+                      </View>
+                    )}
                   </View>
-
-                  <Text style={styles.snippetText} numberOfLines={1}>
-                    {lastMsg?.text || (lastMsg?.productCode ? `📦 Shared Product [${lastMsg.productCode}]` : 'Tap to open chat')}
-                  </Text>
                 </View>
-
-                {unreadCount > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadBadgeCount}>{unreadCount}</Text>
-                    <Text style={styles.unreadBadgeLabel}>{unreadCount === 1 ? 'msg' : 'msgs'}</Text>
-                  </View>
-                )}
               </TouchableOpacity>
             );
           }
 
-          // RENDER 2: TRADE GROUP CARD
+          // RENDER 2: GROUP CHAT CARD
           if (item.feedType === 'GROUP') {
             return (
               <TouchableOpacity
                 style={styles.chatCard}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
                 onPress={() =>
                   navigation.navigate('GroupDetail', {
                     groupId: item.id,
@@ -449,18 +495,19 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
                   <View style={styles.subDetailsRow}>
                     <View style={styles.groupTypeBadge}>
                       <Text style={styles.groupTypeBadgeText}>
-                        {item.onlyAdminCanPost ? '🔒 Admin Broadcast Only' : '💬 Open Discussion Group'}
+                        {item.onlyAdminCanPost ? '🔒 Admin Broadcast Only' : '🌐 Open Discussion Group'}
                       </Text>
                     </View>
                   </View>
 
-                  <Text style={styles.snippetText} numberOfLines={1}>
-                    {item.description || 'Tap to view group discussion...'}
-                  </Text>
-                </View>
-
-                <View style={styles.groupTagBadge}>
-                  <Text style={styles.groupTagBadgeText}>GROUP</Text>
+                  <View style={styles.chatSnippetRow}>
+                    <Text style={styles.snippetText} numberOfLines={1}>
+                      {item.description || 'Tap to view group discussion...'}
+                    </Text>
+                    <View style={styles.groupTagBadge}>
+                      <Text style={styles.groupTagBadgeText}>GROUP</Text>
+                    </View>
+                  </View>
                 </View>
               </TouchableOpacity>
             );
@@ -473,7 +520,7 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
             return (
               <TouchableOpacity
                 style={styles.chatCard}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
                 onPress={() => handleDispatchPrompt(item)}
               >
                 <View style={styles.broadcastIconBox}>
@@ -492,18 +539,23 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
 
                   <View style={styles.subDetailsRow}>
                     <View style={styles.broadcastRecipientPill}>
-                      <Text style={styles.broadcastRecipientPillText}>📢 {recipientCount} Verified Contacts</Text>
+                      <Text style={styles.broadcastRecipientPillText}>📱 {recipientCount} Verified Contacts</Text>
                     </View>
                   </View>
 
-                  <Text style={styles.snippetText} numberOfLines={1}>
-                    {item.description || 'Tap to dispatch 1-to-1 SKU updates...'}
-                  </Text>
+                  <View style={styles.chatSnippetRow}>
+                    <Text style={styles.snippetText} numberOfLines={1}>
+                      {item.description || 'Tap to dispatch 1-to-1 SKU updates...'}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.dispatchQuickBtn}
+                      onPress={() => handleDispatchPrompt(item)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.dispatchQuickBtnText}>Dispatch 🚀</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-
-                <TouchableOpacity style={styles.dispatchQuickBtn} onPress={() => handleDispatchPrompt(item)}>
-                  <Text style={styles.dispatchQuickBtnText}>Dispatch ➔</Text>
-                </TouchableOpacity>
               </TouchableOpacity>
             );
           }
@@ -512,9 +564,12 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
         }}
       />
 
-      {/* WhatsApp-Style Floating Action Button (FAB) */}
+      {/* Modern WhatsApp-Style Floating Action Button (FAB) */}
       <TouchableOpacity
-        style={styles.floatingStartChatFab}
+        style={[
+          styles.floatingStartChatFab,
+          { bottom: 20 + Math.max(insets.bottom, 10) },
+        ]}
         activeOpacity={0.85}
         onPress={() => setIsActionMenuVisible(true)}
       >
@@ -527,8 +582,8 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
         <TouchableWithoutFeedback onPress={() => setIsActionMenuVisible(false)}>
           <View style={styles.actionMenuOverlay}>
             <View style={styles.actionMenuContainer}>
-              <Text style={styles.actionMenuHeaderTitle}>WhatsApp Options</Text>
-              
+              <Text style={styles.actionMenuHeaderTitle}>Quick Actions</Text>
+
               {/* Option 1: Direct Phone Search */}
               <TouchableOpacity
                 style={styles.actionOptionRow}
@@ -605,54 +660,81 @@ export const ChatsScreen: React.FC<Props> = ({ navigation }) => {
           setActiveTab('broadcasts');
         }}
       />
+
+      {/* BUG-017: Cross-platform Broadcast Dispatch Modal */}
+      <Modal
+        visible={dispatchModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDispatchModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.dispatchModalOverlay}
+        >
+          <View style={styles.dispatchModalCard}>
+            <Text style={styles.dispatchModalTitle}>
+              📢 Dispatch to {selectedBroadcastItem?.title || 'Broadcast List'}
+            </Text>
+            <Text style={styles.dispatchModalSub}>
+              Type your announcement to send 1-to-1 to all {selectedBroadcastItem?.recipientsCount || selectedBroadcastItem?.recipients?.length || 0} contact(s):
+            </Text>
+            <TextInput
+              style={styles.dispatchModalInput}
+              placeholder="Enter announcement text..."
+              placeholderTextColor="#64748b"
+              multiline
+              numberOfLines={4}
+              value={broadcastDispatchText}
+              onChangeText={setBroadcastDispatchText}
+            />
+            <View style={styles.dispatchModalBtnRow}>
+              <TouchableOpacity
+                style={styles.dispatchCancelBtn}
+                onPress={() => setDispatchModalVisible(false)}
+              >
+                <Text style={styles.dispatchCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dispatchSubmitBtn, !broadcastDispatchText.trim() && { opacity: 0.5 }]}
+                disabled={!broadcastDispatchText.trim()}
+                onPress={handleConfirmDispatch}
+              >
+                <Text style={styles.dispatchSubmitBtnText}>Dispatch 🚀</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
+  container: {
+    flex: 1,
+    backgroundColor: '#020617',
+  },
   headerRightRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 8,
   },
-  headerBtn: {
-    backgroundColor: '#065f46',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 16,
+  headerActionBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
   },
-  headerBtnText: {
-    color: '#34d399',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  headerBtnSecondary: {
-    backgroundColor: '#831843',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 16,
-  },
-  headerBtnSecondaryText: {
-    color: '#f472b6',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  newChatHeaderBtn: {
-    backgroundColor: '#4f46e5',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 16,
-  },
-  newChatHeaderBtnText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '800',
+  headerActionIcon: {
+    fontSize: 16,
   },
   searchBarContainer: {
     paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 4,
+    paddingTop: 8,
+    paddingBottom: 6,
   },
   searchInputWrapper: {
     flexDirection: 'row',
@@ -660,52 +742,67 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    height: 42,
     borderWidth: 1,
     borderColor: '#1e293b',
   },
   searchIcon: {
-    fontSize: 16,
+    fontSize: 15,
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
     color: '#f8fafc',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '500',
+    paddingVertical: 0,
   },
   clearSearchBtn: {
-    padding: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
   clearSearchText: {
-    color: '#94a3b8',
-    fontSize: 14,
+    color: '#cbd5e1',
+    fontSize: 11,
     fontWeight: '700',
+    lineHeight: 13,
   },
   startChatQuickBtn: {
     backgroundColor: '#312e81',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4338ca',
+    marginLeft: 6,
   },
   startChatQuickText: {
-    color: '#a5b4fc',
+    color: '#c7d2fe',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   tabContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 6,
+    paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
   },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: 7,
+  tabScrollContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 10,
+  },
+  tabBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
     backgroundColor: '#0f172a',
     borderWidth: 1,
     borderColor: '#1e293b',
@@ -714,23 +811,50 @@ const styles = StyleSheet.create({
     backgroundColor: '#4f46e5',
     borderColor: '#6366f1',
   },
-  tabText: { color: '#94a3b8', fontSize: 11, fontWeight: '700' },
-  tabTextActive: { color: '#ffffff' },
-  loadingText: { color: '#94a3b8', textAlign: 'center', marginVertical: 30 },
+  tabText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  tabTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  listContent: {
+    paddingTop: 2,
+    paddingBottom: 90,
+  },
+  itemSeparator: {
+    height: 1,
+    backgroundColor: '#1e293b',
+    marginLeft: 74,
+    opacity: 0.5,
+  },
+  loadingText: {
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginVertical: 30,
+  },
   chatCard: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#0f172a',
+    paddingVertical: 11,
   },
-  avatarContainer: { position: 'relative', marginRight: 12 },
-  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#1e293b' },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 12,
+  },
+  avatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#1e293b',
+  },
   defaultAvatarCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: '#3730a3',
     alignItems: 'center',
     justifyContent: 'center',
@@ -739,24 +863,24 @@ const styles = StyleSheet.create({
   },
   defaultAvatarText: {
     color: '#ffffff',
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '800',
   },
   onlineDot: {
     position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
+    bottom: 1,
+    right: 1,
+    width: 11,
+    height: 11,
     borderRadius: 6,
     backgroundColor: '#10b981',
     borderWidth: 2,
     borderColor: '#020617',
   },
   groupIconBox: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: '#064e3b',
     alignItems: 'center',
     justifyContent: 'center',
@@ -764,11 +888,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#10b981',
   },
-  groupIcon: { fontSize: 22 },
+  groupIcon: {
+    fontSize: 20,
+  },
   broadcastIconBox: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: '#831843',
     alignItems: 'center',
     justifyContent: 'center',
@@ -776,25 +902,40 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f472b6',
   },
-  broadcastIcon: { fontSize: 22 },
-  chatDetails: { flex: 1 },
+  broadcastIcon: {
+    fontSize: 20,
+  },
+  chatDetails: {
+    flex: 1,
+  },
   chatHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  shopTitle: { color: '#f8fafc', fontSize: 15, fontWeight: '800', flex: 1, marginRight: 8 },
-  timeText: { color: '#64748b', fontSize: 11 },
+  shopTitle: {
+    color: '#f8fafc',
+    fontSize: 15,
+    fontWeight: '700',
+    flex: 1,
+    marginRight: 8,
+  },
+  timeText: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '500',
+  },
   subDetailsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginVertical: 3,
+    marginTop: 2,
+    marginBottom: 2,
   },
   phoneTag: {
     backgroundColor: '#1e1b4b',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#3730a3',
@@ -802,12 +943,12 @@ const styles = StyleSheet.create({
   phoneTagText: {
     color: '#a5b4fc',
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   groupTypeBadge: {
     backgroundColor: '#022c22',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#065f46',
@@ -815,12 +956,12 @@ const styles = StyleSheet.create({
   groupTypeBadgeText: {
     color: '#34d399',
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   broadcastRecipientPill: {
     backgroundColor: '#500724',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#9d174d',
@@ -828,17 +969,37 @@ const styles = StyleSheet.create({
   broadcastRecipientPillText: {
     color: '#f472b6',
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  cityText: { color: '#818cf8', fontSize: 11, flexShrink: 1 },
-  snippetText: { color: '#94a3b8', fontSize: 13 },
-  capacityBadge: { color: '#34d399', fontSize: 11, fontWeight: '800' },
+  cityText: {
+    color: '#818cf8',
+    fontSize: 11,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  chatSnippetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 1,
+  },
+  snippetText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    flex: 1,
+    marginRight: 6,
+  },
+  capacityBadge: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   groupTagBadge: {
     backgroundColor: '#064e3b',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    marginLeft: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 6,
   },
   groupTagBadgeText: {
     color: '#34d399',
@@ -847,61 +1008,83 @@ const styles = StyleSheet.create({
   },
   dispatchQuickBtn: {
     backgroundColor: '#831843',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-    marginLeft: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginLeft: 6,
   },
   dispatchQuickBtnText: {
     color: '#ffffff',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   unreadBadge: {
     backgroundColor: '#10b981',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginLeft: 8,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 4,
   },
   unreadBadgeCount: {
     color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '900',
+    fontSize: 10,
+    fontWeight: '800',
   },
-  unreadBadgeLabel: {
-    color: '#d1fae5',
-    fontSize: 9,
+  discoveryCard: {
+    marginHorizontal: 16,
+    marginTop: 20,
+    backgroundColor: '#0b1329',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+  },
+  discoveryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 6,
+  },
+  discoveryIcon: {
+    fontSize: 16,
+  },
+  discoveryTitle: {
+    color: '#e2e8f0',
+    fontSize: 13,
     fontWeight: '700',
+  },
+  discoverySubtitle: {
+    color: '#94a3b8',
+    fontSize: 12,
+    lineHeight: 17,
   },
   floatingStartChatFab: {
     position: 'absolute',
-    bottom: 24,
-    right: 20,
+    right: 18,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#4f46e5',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 30,
+    paddingVertical: 11,
+    borderRadius: 25,
     elevation: 8,
     shadowColor: '#6366f1',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.35,
     shadowRadius: 6,
     borderWidth: 1,
     borderColor: '#818cf8',
     gap: 6,
   },
   floatingFabIcon: {
-    fontSize: 18,
+    fontSize: 16,
   },
   floatingFabText: {
     color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '700',
   },
   actionMenuOverlay: {
     flex: 1,
@@ -948,12 +1131,78 @@ const styles = StyleSheet.create({
   },
   actionOptionTitle: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '700',
   },
   actionOptionSub: {
     color: '#94a3b8',
-    fontSize: 12,
+    fontSize: 11,
     marginTop: 2,
+  },
+  dispatchModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  dispatchModalCard: {
+    width: '100%',
+    backgroundColor: '#0f172a',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    padding: 20,
+  },
+  dispatchModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  dispatchModalSub: {
+    fontSize: 13,
+    color: '#94a3b8',
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  dispatchModalInput: {
+    backgroundColor: '#020617',
+    borderWidth: 1,
+    borderColor: '#334155',
+    borderRadius: 12,
+    color: '#ffffff',
+    padding: 12,
+    fontSize: 14,
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  dispatchModalBtnRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  dispatchCancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#1e293b',
+  },
+  dispatchCancelBtnText: {
+    color: '#94a3b8',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  dispatchSubmitBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#4f46e5',
+  },
+  dispatchSubmitBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });

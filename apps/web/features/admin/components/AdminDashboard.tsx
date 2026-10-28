@@ -14,6 +14,7 @@ import {
   useTerminateSessionMutation,
   useTerminateAllSessionsMutation,
   useDeleteAccountMutation,
+  useRejectDeletionRequestMutation,
   useCreateUserMutation,
   useUpdateUserMutation,
 } from '../../../lib/redux/api/adminApi';
@@ -193,6 +194,7 @@ export function AdminDashboard() {
   const [terminateSession] = useTerminateSessionMutation();
   const [terminateAllSessions, { isLoading: isTerminatingAll }] = useTerminateAllSessionsMutation();
   const [deleteAccount] = useDeleteAccountMutation();
+  const [rejectDeletion] = useRejectDeletionRequestMutation();
   const [createUser] = useCreateUserMutation();
   const [updateUser] = useUpdateUserMutation();
 
@@ -268,6 +270,18 @@ export function AdminDashboard() {
       setTimeout(() => setActionMsg(null), 4000);
     } catch {
       setActionMsg('❌ Failed to terminate active user sessions');
+      setTimeout(() => setActionMsg(null), 4000);
+    }
+  };
+
+  const handleRejectDeletion = async (userId: string, shopName: string) => {
+    try {
+      await rejectDeletion(userId).unwrap();
+      setActionMsg(`✅ Deletion request for "${shopName}" dismissed successfully.`);
+      refetchDeletions();
+      setTimeout(() => setActionMsg(null), 4000);
+    } catch {
+      setActionMsg('❌ Failed to dismiss deletion request');
       setTimeout(() => setActionMsg(null), 4000);
     }
   };
@@ -677,8 +691,8 @@ export function AdminDashboard() {
               className={`w-full text-left px-4 py-2.5 rounded-xl text-xs font-semibold flex justify-between items-center ${activeTab === 'SUBSCRIPTION' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'
                 }`}
             >
-              <span>💳 Subscription Rules</span>
-              <span className="bg-slate-950/40 px-2 py-0.5 rounded-full text-[10px] font-bold">CONFIG</span>
+              <span>💳 Subscription Engine & Settings</span>
+              <span className="bg-slate-950/40 px-2 py-0.5 rounded-full text-[10px] font-bold">ENGINE</span>
             </button>
             <button
               onClick={() => {
@@ -770,10 +784,10 @@ export function AdminDashboard() {
           {activeTab === 'CATEGORY_REQUESTS' && <AdminCategoryRequestsPanel />}
 
           {/* TAB 7: Super Admin Payment Engine & Invoices */}
-          {activeTab === 'PAYMENTS' && <AdminPaymentPanel />}
+          {activeTab === 'PAYMENTS' && <AdminSubscriptionPanel initialTab="TRANSACTIONS" />}
 
           {/* TAB 6: Subscription System Engine Control Panel */}
-          {activeTab === 'SUBSCRIPTION' && <AdminSubscriptionPanel />}
+          {activeTab === 'SUBSCRIPTION' && <AdminSubscriptionPanel initialTab="DUAL" />}
 
 
           {/* TAB 5: Group Member Rules & Super Admin Control Panel */}
@@ -1323,28 +1337,106 @@ export function AdminDashboard() {
 
           {/* TAB 4: Deletion Requests */}
           {activeTab === 'DELETIONS' && (
-            <div className="glass-card p-6 rounded-2xl border-rose-500/30 space-y-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                ⚠️ Pending Account Deletion Requests ({deletions.length})
-              </h3>
-              {deletions.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-xs">No pending deletion requests.</div>
-              ) : (
-                <div className="space-y-3">
-                  {deletions.map((d: any) => (
-                    <div key={d.id} className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex justify-between items-center text-xs">
-                      <div>
-                        <h4 className="font-bold text-white">{d.shopName}</h4>
-                        <p className="text-slate-400">Reason: {d.reason}</p>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteAccount(d.userId, d.shopName)}
-                        className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold"
-                      >
-                        Confirm Delete Account
-                      </button>
+            <div className="glass-card p-6 rounded-3xl border border-rose-500/30 space-y-6">
+              <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-800/80 pb-4">
+                <div>
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2 rounded-xl bg-rose-500/20 text-rose-400 text-lg border border-rose-500/30">
+                      ⚠️
+                    </span>
+                    <div>
+                      <h3 className="text-lg font-extrabold text-white">
+                        Pending Account Deletion Requests ({deletions.length})
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Compliance dashboard for Google Play Store & Apple App Store account deletion requests.
+                      </p>
                     </div>
-                  ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => refetchDeletions()}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+
+              {deletions.length === 0 ? (
+                <div className="glass-card p-12 text-center rounded-2xl border border-slate-800 space-y-2">
+                  <span className="text-3xl">🎉</span>
+                  <h4 className="font-bold text-sm text-white">No Pending Deletion Requests</h4>
+                  <p className="text-xs text-slate-400">
+                    All registered customer accounts are in good standing with zero pending deletion requests.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {deletions.map((d: any) => {
+                    const reqId = d.userId || d.id;
+                    return (
+                      <div
+                        key={reqId}
+                        className="glass-card p-5 rounded-2xl border border-rose-500/30 bg-slate-900/80 space-y-4 shadow-xl"
+                      >
+                        <div className="flex items-start justify-between flex-wrap gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2.5">
+                              <h4 className="font-extrabold text-base text-white">
+                                {d.shopName || 'Business Store'}
+                              </h4>
+                              {d.ownerName && (
+                                <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 text-xs font-semibold">
+                                  Owner: {d.ownerName}
+                                </span>
+                              )}
+                              <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px] font-extrabold border border-rose-500/40">
+                                DELETION PENDING
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-4 text-xs text-slate-400 flex-wrap pt-1 font-mono">
+                              {d.mobileNumber && <span>📱 {d.mobileNumber}</span>}
+                              {d.email && <span>✉️ {d.email}</span>}
+                              {d.requestedAt && (
+                                <span className="text-slate-500 font-sans">
+                                  Requested on: {new Date(d.requestedAt).toLocaleString()}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Reason Banner */}
+                        <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-1">
+                          <span className="text-rose-400 font-bold uppercase text-[10px] tracking-wider block">
+                            User Stated Reason for Account Deletion:
+                          </span>
+                          <p className="text-slate-200 leading-relaxed font-medium">
+                            "{d.reason || 'No specific reason provided by user'}"
+                          </p>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-800/80 flex items-center justify-end gap-3">
+                          <button
+                            onClick={() => handleRejectDeletion(reqId, d.shopName || d.ownerName)}
+                            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 transition"
+                          >
+                            Dismiss / Keep Account
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAccount(reqId, d.shopName || d.ownerName)}
+                            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 transition flex items-center gap-1.5"
+                          >
+                            <span>🗑️</span> Confirm Permanent Deletion
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -172,6 +172,27 @@ export const chatApi = baseApi.injectEndpoints({
       }),
     }),
 
+    editMessage: builder.mutation<
+      { success: boolean; message: ChatMessage },
+      { messageId: string; text: string }
+    >({
+      query: ({ messageId, text }) => ({
+        url: `/chat/messages/${messageId}`,
+        method: 'PUT',
+        body: { text },
+      }),
+    }),
+
+    deleteMessage: builder.mutation<
+      { success: boolean; message: ChatMessage },
+      string
+    >({
+      query: (messageId) => ({
+        url: `/chat/messages/${messageId}`,
+        method: 'DELETE',
+      }),
+    }),
+
     searchUsers: builder.query<{ success: boolean; users: SearchedUserItem[] }, string>({
       query: (query) => ({
         url: '/chat/users/search',
@@ -200,6 +221,8 @@ export const {
   useForwardMessageMutation,
   useToggleReactionMutation,
   useStarMessageMutation,
+  useEditMessageMutation,
+  useDeleteMessageMutation,
   useMarkConversationAsReadMutation,
   useSearchUsersQuery,
   useLazySearchUsersQuery,

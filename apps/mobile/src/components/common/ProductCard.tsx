@@ -45,9 +45,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
         {product.business && (
           <View style={styles.vendorRow}>
-            <Text style={styles.vendorName} numberOfLines={1}>
-              🏪 {product.business.shopName}
-            </Text>
+            <Text style={styles.vendorName} numberOfLines={1}>🏪 {product.business.shopName}</Text>
             {product.business.verificationTag && <Text style={styles.verifiedTag}>✓ Verified</Text>}
           </View>
         )}

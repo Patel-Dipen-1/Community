@@ -27,6 +27,7 @@ export type RootStackParamList = {
   Subscription: undefined;
   Settings: undefined;
   Call: {
+    callId?: string;
     recipientId: string;
     recipientName: string;
     recipientAvatar?: string;
