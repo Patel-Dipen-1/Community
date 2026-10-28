@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
-import { Audio } from 'expo-av';
+import { Audio } from '../services/audio/safeAudio';
 import { RootStackParamList } from '../types/navigation.types';
 import { Header } from '../components/common/Header';
 import {
@@ -153,10 +153,17 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, []);
 
-  // BUG-009: Real Voice Note Recording via expo-av
+  // BUG-009: Real Voice Note Recording via safe Audio service
   const handleStartVoiceRecording = async () => {
     try {
       setAttachmentModalVisible(false);
+      if (!Audio.isAvailable) {
+        Alert.alert(
+          'Feature Unavailable in Expo Go',
+          'Voice note recording requires native audio modules which are not included in Expo Go. Please run a development build (npx expo run:android) to use audio recording.'
+        );
+        return;
+      }
       const perm = await Audio.requestPermissionsAsync();
       if (perm.status !== 'granted') {
         Alert.alert('Microphone Permission', 'Microphone access is required to record voice notes.');
@@ -253,6 +260,14 @@ export const ChatDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
       if (!audioUrl) {
         Alert.alert('Audio Unavailable', 'No audio file found for this message.');
+        return;
+      }
+
+      if (!Audio.isAvailable) {
+        Alert.alert(
+          'Feature Unavailable in Expo Go',
+          'Voice note playback requires native audio modules which are not included in Expo Go. Please run a development build (npx expo run:android).'
+        );
         return;
       }
 

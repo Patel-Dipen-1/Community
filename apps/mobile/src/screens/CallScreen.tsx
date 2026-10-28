@@ -7,7 +7,7 @@ import {
   Image,
   Alert,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { Audio } from '../services/audio/safeAudio';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation.types';
 import { colors, spacing, borderRadius } from '../theme/theme';

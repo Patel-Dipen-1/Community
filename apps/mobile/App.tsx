@@ -11,6 +11,8 @@ LogBox.ignoreLogs([
   '`expo-notifications` functionality is not fully supported in Expo Go',
   'expo-notifications: Android Push notifications',
   'SafeAreaView has been deprecated',
+  '[expo-av]',
+  '[SafeAudio]',
 ]);
 
 export default function App() {

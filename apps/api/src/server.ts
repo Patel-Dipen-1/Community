@@ -34,30 +34,84 @@ import { authenticateToken, requireSuperAdmin } from './middleware/auth.middlewa
 
 dotenv.config();
 
-// BUG-036: Strict CORS Whitelist Configuration
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-  : [
-      'http://localhost:3000',
-      'http://localhost:5000',
-      'http://localhost:8081',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:8081',
-      'exp://localhost:8081',
-    ];
+// BUG-036: Strict CORS Whitelist Configuration with Domain & Subdomain Support
+const configuredOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
+
+const defaultAllowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5000',
+  'http://localhost:8081',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5000',
+  'http://127.0.0.1:8081',
+  'exp://localhost:8081',
+  'https://communityapi.radheytechsolutions.com',
+  'https://community.radheytechsolutions.com',
+  'https://admin.radheytechsolutions.com',
+  'https://radheytechsolutions.com',
+];
+
+const allAllowedOrigins = [...new Set([...defaultAllowedOrigins, ...configuredOrigins])];
+
+export const isOriginAllowed = (origin: string): boolean => {
+  if (process.env.CORS_ORIGIN === '*' || configuredOrigins.includes('*')) {
+    return true;
+  }
+  if (allAllowedOrigins.includes(origin)) {
+    return true;
+  }
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === 'radheytechsolutions.com' ||
+      host.endsWith('.radheytechsolutions.com') ||
+      host.endsWith('.vercel.app')
+    ) {
+      return true;
+    }
+  } catch (e) {
+    // Malformed URL, check prefixes
+  }
+  if (
+    origin.startsWith('http://localhost:') ||
+    origin.startsWith('http://127.0.0.1:') ||
+    origin.startsWith('http://192.168.') ||
+    origin.startsWith('http://10.') ||
+    origin.startsWith('exp://')
+  ) {
+    return true;
+  }
+  return false;
+};
 
 const corsOriginChecker = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
   // Mobile applications, curl, and server-to-server requests send no Origin header
   if (!origin) return callback(null, true);
-  if (
-    allowedOrigins.includes(origin) ||
-    origin.startsWith('http://localhost:') ||
-    origin.startsWith('http://127.0.0.1:') ||
-    origin.startsWith('exp://')
-  ) {
+  if (isOriginAllowed(origin)) {
     return callback(null, true);
   }
-  return callback(new Error(`CORS blocked for origin: ${origin}`));
+  logger.warn(`⚠️ CORS blocked for origin: ${origin}`);
+  return callback(null, false);
+};
+
+const corsOptions: cors.CorsOptions = {
+  origin: corsOriginChecker,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Cache-Control',
+    'Origin',
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  optionsSuccessStatus: 204,
+  preflightContinue: false,
 };
 
 const app = express();
@@ -125,14 +179,8 @@ const PORT = process.env.PORT || 5000;
 // 1. Production Security & Optimization Middlewares
 app.use(helmet({ crossOriginResourcePolicy: false })); // Security Headers
 app.use(compression());
-app.use(
-  cors({
-    origin: corsOriginChecker,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Cache-Control'],
-  })
-);
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(globalRateLimiter);
@@ -146,7 +194,7 @@ app.use(
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Accept-Ranges', 'bytes');
       const reqOrigin = res.req?.headers?.origin;
-      if (typeof reqOrigin === 'string' && (allowedOrigins.includes(reqOrigin) || reqOrigin.startsWith('http://localhost:') || reqOrigin.startsWith('http://127.0.0.1:'))) {
+      if (typeof reqOrigin === 'string' && isOriginAllowed(reqOrigin)) {
         res.setHeader('Access-Control-Allow-Origin', reqOrigin);
       }
       if (filePath.endsWith('.webm')) {

@@ -1,11 +1,12 @@
 import rateLimit from 'express-rate-limit';
 
-// Global API Rate Limiter (300 requests per 15 mins per IP)
+// Global API Rate Limiter (600 requests per 15 mins per IP)
 export const globalRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 600, // 600 requests per 15 minutes for normal app traffic
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   message: {
     error: 'Too many requests from this IP. Please try again later.'
   }
@@ -17,6 +18,7 @@ export const authRateLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   message: {
     error: 'Too many login attempts. Please wait 15 minutes before retrying.'
   }
@@ -28,6 +30,7 @@ export const searchRateLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   message: {
     error: 'Search query rate limit exceeded. Please slow down.'
   }
@@ -39,6 +42,7 @@ export const messageRateLimiter = rateLimit({
   max: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   message: {
     error: 'Message rate limit exceeded. Please wait a moment.'
   }
@@ -50,6 +54,7 @@ export const uploadRateLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   message: {
     error: 'Upload rate limit exceeded. Please try again after a few minutes.'
   }
